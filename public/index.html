@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IIT Veterinaria</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="logo">🐾</span>
+      <div><strong>IIT Veterinaria</strong><small>Cuidado animal</small></div>
+    </div>
+    <nav id="menu">
+      <p class="menu-title">Principal</p>
+      <a data-view="dashboard" href="#dashboard">📊 Inicio</a>
+      <a data-view="citas" href="#citas">📅 Agenda</a>
+      <a data-view="consultas" href="#consultas">🩺 Consultas</a>
+      <p class="menu-title">Clínica</p>
+      <a data-view="pacientes" href="#pacientes">🐶 Pacientes</a>
+      <a data-view="propietarios" href="#propietarios">👤 Propietarios</a>
+      <a data-view="vacunas" href="#vacunas">💉 Vacunación</a>
+      <a data-view="hospitalizaciones" href="#hospitalizaciones">🏥 Hospitalización</a>
+      <a data-view="peluqueria" href="#peluqueria">✂️ Peluquería</a>
+      <p class="menu-title">Administración</p>
+      <a data-view="productos" href="#productos">📦 Inventario</a>
+      <a data-view="ventas" href="#ventas">💵 Ventas</a>
+      <a data-view="reportes" href="#reportes">📈 Reportes</a>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="hamburger" id="toggle" aria-label="Menú">☰</button>
+      <h1 id="title">Inicio</h1>
+      <span class="user">Infraestructura-IT</span>
+    </header>
+    <main id="view"></main>
+  </div>
+
+  <dialog id="modal">
+    <form id="form" method="dialog">
+      <h2 id="form-title"></h2>
+      <div id="form-errors" class="errors"></div>
+      <div id="form-fields" class="grid"></div>
+      <div class="actions">
+        <button type="button" class="btn ghost" id="cancel">Cancelar</button>
+        <button type="submit" class="btn primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
