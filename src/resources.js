@@ -1,6 +1,10 @@
 // Definición de módulos (recursos) del sistema veterinario.
-// Cada recurso genera su tabla SQLite, su API REST y su formulario en la interfaz.
-// Tipos de campo: text, textarea, number, date, time, email, select, ref (llave foránea).
+// Cada recurso genera su tabla SQLite, su API REST, su validación y su formulario.
+// Tipos de campo: text, textarea, number, date, time, email, select, ref (llave foránea), signature (firma).
+// write: roles que pueden crear/editar/eliminar (por defecto todos). Leer: cualquier usuario autenticado.
+
+const CLINICOS = ['admin', 'veterinario'];
+const ADMINISTRATIVOS = ['admin', 'recepcion'];
 
 const resources = {
   propietarios: {
@@ -20,7 +24,7 @@ const resources = {
     label: 'Pacientes',
     singular: 'Paciente',
     display: 'nombre',
-    search: ['nombre', 'especie', 'raza'],
+    search: ['nombre', 'especie', 'raza', 'microchip'],
     fields: [
       { name: 'nombre', label: 'Nombre', type: 'text', required: true },
       { name: 'especie', label: 'Especie', type: 'select', required: true,
@@ -30,6 +34,9 @@ const resources = {
       { name: 'fecha_nacimiento', label: 'Fecha de nacimiento', type: 'date' },
       { name: 'color', label: 'Color', type: 'text' },
       { name: 'peso', label: 'Peso (kg)', type: 'number' },
+      { name: 'microchip', label: 'Microchip', type: 'text' },
+      { name: 'esterilizado', label: 'Esterilizado', type: 'select', options: ['Sí', 'No'] },
+      { name: 'alergias', label: 'Alergias / Alertas', type: 'textarea' },
       { name: 'propietario_id', label: 'Propietario', type: 'ref', ref: 'propietarios', required: true },
     ],
   },
@@ -44,10 +51,14 @@ const resources = {
       { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
       { name: 'fecha', label: 'Fecha', type: 'date', required: true },
       { name: 'hora', label: 'Hora', type: 'time', required: true },
+      { name: 'tipo', label: 'Tipo', type: 'select', default: 'Consulta',
+        options: ['Consulta', 'Vacunación', 'Control', 'Cirugía', 'Peluquería', 'Urgencia'] },
       { name: 'motivo', label: 'Motivo', type: 'text', required: true },
       { name: 'veterinario', label: 'Veterinario', type: 'text' },
       { name: 'estado', label: 'Estado', type: 'select', required: true, default: 'Programada',
-        options: ['Programada', 'Confirmada', 'Atendida', 'Cancelada', 'No asistió'] },
+        options: ['Solicitada', 'Programada', 'Confirmada', 'En sala de espera', 'En consulta', 'Atendida', 'Cancelada', 'No asistió'] },
+      { name: 'triage', label: 'Triage', type: 'select', default: 'Normal', options: ['Normal', 'Prioritario', 'Urgente'] },
+      { name: 'hora_llegada', label: 'Hora de llegada', type: 'time' },
     ],
   },
   consultas: {
@@ -57,19 +68,38 @@ const resources = {
     display: 'motivo',
     search: ['motivo', 'diagnostico', 'veterinario'],
     order: 'fecha DESC',
+    write: CLINICOS,
     fields: [
       { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
       { name: 'fecha', label: 'Fecha', type: 'date', required: true },
       { name: 'motivo', label: 'Motivo de consulta', type: 'text', required: true },
-      { name: 'anamnesis', label: 'Anamnesis', type: 'textarea' },
+      { name: 'anamnesis', label: 'Anamnesis (S)', type: 'textarea' },
       { name: 'temperatura', label: 'Temperatura (°C)', type: 'number' },
       { name: 'peso', label: 'Peso (kg)', type: 'number' },
       { name: 'frecuencia_cardiaca', label: 'Frec. cardiaca (lpm)', type: 'number' },
       { name: 'frecuencia_respiratoria', label: 'Frec. respiratoria (rpm)', type: 'number' },
-      { name: 'examen_fisico', label: 'Examen físico', type: 'textarea' },
-      { name: 'diagnostico', label: 'Diagnóstico', type: 'textarea' },
-      { name: 'tratamiento', label: 'Tratamiento / Fórmula', type: 'textarea' },
+      { name: 'examen_fisico', label: 'Examen físico (O)', type: 'textarea' },
+      { name: 'diagnostico', label: 'Diagnóstico (A)', type: 'textarea' },
+      { name: 'tratamiento', label: 'Plan / Tratamiento (P)', type: 'textarea' },
       { name: 'veterinario', label: 'Veterinario', type: 'text' },
+    ],
+  },
+  recetas: {
+    label: 'Recetas',
+    singular: 'Receta',
+    fem: true,
+    display: 'fecha',
+    search: ['medicamentos', 'veterinario'],
+    order: 'fecha DESC',
+    write: CLINICOS,
+    print: true,
+    fields: [
+      { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
+      { name: 'fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'medicamentos', label: 'Medicamentos (uno por línea: nombre, dosis, frecuencia, duración)', type: 'textarea', required: true },
+      { name: 'indicaciones', label: 'Indicaciones adicionales', type: 'textarea' },
+      { name: 'veterinario', label: 'Veterinario', type: 'text', required: true },
+      { name: 'tarjeta_profesional', label: 'Tarjeta profesional', type: 'text' },
     ],
   },
   vacunas: {
@@ -79,6 +109,7 @@ const resources = {
     display: 'vacuna',
     search: ['vacuna', 'lote'],
     order: 'fecha_aplicacion DESC',
+    write: CLINICOS,
     fields: [
       { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
       { name: 'tipo', label: 'Tipo', type: 'select', required: true, default: 'Vacuna',
@@ -89,6 +120,37 @@ const resources = {
       { name: 'proxima_dosis', label: 'Próxima dosis', type: 'date' },
     ],
   },
+  cirugias: {
+    label: 'Cirugías',
+    singular: 'Cirugía',
+    fem: true,
+    display: 'procedimiento',
+    search: ['procedimiento', 'cirujano', 'estado'],
+    order: 'fecha DESC',
+    write: CLINICOS,
+    print: true,
+    fields: [
+      { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
+      { name: 'fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'procedimiento', label: 'Procedimiento', type: 'text', required: true },
+      { name: 'estado', label: 'Estado', type: 'select', required: true, default: 'Programada',
+        options: ['Programada', 'En curso', 'Finalizada', 'Cancelada'] },
+      { name: 'cirujano', label: 'Cirujano', type: 'text' },
+      { name: 'anestesiologo', label: 'Anestesiólogo', type: 'text' },
+      { name: 'asa', label: 'Riesgo anestésico (ASA)', type: 'select', options: ['ASA I', 'ASA II', 'ASA III', 'ASA IV', 'ASA V'] },
+      { name: 'ayuno', label: 'Horas de ayuno', type: 'number' },
+      { name: 'peso', label: 'Peso (kg)', type: 'number' },
+      { name: 'hora_inicio', label: 'Hora inicio', type: 'time' },
+      { name: 'hora_fin', label: 'Hora fin', type: 'time' },
+      { name: 'premedicacion', label: 'Premedicación (fármaco, dosis, vía)', type: 'textarea' },
+      { name: 'induccion', label: 'Inducción', type: 'textarea' },
+      { name: 'mantenimiento', label: 'Mantenimiento anestésico', type: 'textarea' },
+      { name: 'monitoreo', label: 'Monitoreo (FC, FR, SpO2, T°, PA por hora)', type: 'textarea' },
+      { name: 'hallazgos', label: 'Descripción quirúrgica / hallazgos', type: 'textarea' },
+      { name: 'complicaciones', label: 'Complicaciones', type: 'textarea' },
+      { name: 'postoperatorio', label: 'Indicaciones postoperatorias', type: 'textarea' },
+    ],
+  },
   hospitalizaciones: {
     label: 'Hospitalización',
     singular: 'Hospitalización',
@@ -96,6 +158,7 @@ const resources = {
     display: 'motivo',
     search: ['motivo', 'jaula', 'estado'],
     order: 'fecha_ingreso DESC',
+    write: CLINICOS,
     fields: [
       { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
       { name: 'fecha_ingreso', label: 'Fecha de ingreso', type: 'date', required: true },
@@ -105,6 +168,26 @@ const resources = {
         options: ['Hospitalizado', 'En observación', 'Dado de alta', 'Fallecido'] },
       { name: 'fecha_salida', label: 'Fecha de salida', type: 'date' },
       { name: 'observaciones', label: 'Evolución / Observaciones', type: 'textarea' },
+    ],
+  },
+  guarderia: {
+    label: 'Guardería',
+    singular: 'Estadía',
+    fem: true,
+    display: 'jaula',
+    search: ['jaula', 'estado'],
+    order: 'fecha_ingreso DESC',
+    fields: [
+      { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
+      { name: 'fecha_ingreso', label: 'Fecha de ingreso', type: 'date', required: true },
+      { name: 'fecha_salida', label: 'Fecha de salida', type: 'date', required: true },
+      { name: 'estado', label: 'Estado', type: 'select', required: true, default: 'Reservado',
+        options: ['Reservado', 'Hospedado', 'Finalizado', 'Cancelado'] },
+      { name: 'jaula', label: 'Habitación / Jaula', type: 'text' },
+      { name: 'tarifa_dia', label: 'Tarifa por día', type: 'number' },
+      { name: 'alimentacion', label: 'Alimentación', type: 'textarea' },
+      { name: 'medicacion', label: 'Medicación', type: 'textarea' },
+      { name: 'observaciones', label: 'Observaciones', type: 'textarea' },
     ],
   },
   peluqueria: {
@@ -123,11 +206,30 @@ const resources = {
       { name: 'observaciones', label: 'Observaciones', type: 'textarea' },
     ],
   },
+  consentimientos: {
+    label: 'Consentimientos',
+    singular: 'Consentimiento',
+    display: 'tipo',
+    search: ['tipo', 'firmante'],
+    order: 'fecha DESC',
+    print: true,
+    fields: [
+      { name: 'paciente_id', label: 'Paciente', type: 'ref', ref: 'pacientes', required: true },
+      { name: 'fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'tipo', label: 'Tipo', type: 'select', required: true,
+        options: ['Cirugía', 'Anestesia', 'Hospitalización', 'Eutanasia', 'Guardería', 'Otro'] },
+      { name: 'texto', label: 'Texto del consentimiento', type: 'textarea', required: true },
+      { name: 'firmante', label: 'Nombre de quien firma', type: 'text', required: true },
+      { name: 'documento_firmante', label: 'Documento de quien firma', type: 'text', required: true },
+      { name: 'firma', label: 'Firma', type: 'signature', required: true },
+    ],
+  },
   productos: {
     label: 'Inventario',
     singular: 'Producto',
     display: 'nombre',
     search: ['nombre', 'codigo', 'categoria'],
+    write: ADMINISTRATIVOS,
     fields: [
       { name: 'codigo', label: 'Código', type: 'text' },
       { name: 'nombre', label: 'Nombre', type: 'text', required: true },
@@ -136,23 +238,49 @@ const resources = {
       { name: 'stock', label: 'Stock', type: 'number', required: true, default: 0 },
       { name: 'stock_minimo', label: 'Stock mínimo', type: 'number', default: 0 },
       { name: 'precio', label: 'Precio de venta', type: 'number', required: true },
+      { name: 'iva', label: 'IVA (%)', type: 'select', default: '0', options: ['0', '5', '19'] },
+      { name: 'vencimiento', label: 'Fecha de vencimiento', type: 'date' },
     ],
   },
-  ventas: {
-    label: 'Ventas',
-    singular: 'Venta',
-    fem: true,
-    display: 'concepto',
-    search: ['concepto', 'metodo_pago'],
-    order: 'fecha DESC',
+  proveedores: {
+    label: 'Proveedores',
+    singular: 'Proveedor',
+    display: 'nombre',
+    search: ['nombre', 'nit', 'contacto'],
+    write: ADMINISTRATIVOS,
     fields: [
-      { name: 'propietario_id', label: 'Cliente', type: 'ref', ref: 'propietarios', required: true },
-      { name: 'fecha', label: 'Fecha', type: 'date', required: true },
-      { name: 'concepto', label: 'Concepto', type: 'text', required: true },
-      { name: 'total', label: 'Total', type: 'number', required: true },
-      { name: 'metodo_pago', label: 'Método de pago', type: 'select', required: true, default: 'Efectivo',
-        options: ['Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata'] },
+      { name: 'nombre', label: 'Razón social', type: 'text', required: true },
+      { name: 'nit', label: 'NIT', type: 'text' },
+      { name: 'contacto', label: 'Contacto', type: 'text' },
+      { name: 'telefono', label: 'Teléfono', type: 'text' },
+      { name: 'email', label: 'Correo', type: 'email' },
     ],
+  },
+  compras: {
+    label: 'Compras',
+    singular: 'Compra',
+    fem: true,
+    display: 'factura_proveedor',
+    search: ['factura_proveedor'],
+    order: 'fecha DESC',
+    write: ADMINISTRATIVOS,
+    // La cantidad y el producto no se editan: para corregir, se elimina la compra (revierte stock) y se registra de nuevo.
+    immutable: ['producto_id', 'cantidad'],
+    fields: [
+      { name: 'proveedor_id', label: 'Proveedor', type: 'ref', ref: 'proveedores', required: true },
+      { name: 'producto_id', label: 'Producto', type: 'ref', ref: 'productos', required: true },
+      { name: 'fecha', label: 'Fecha', type: 'date', required: true },
+      { name: 'cantidad', label: 'Cantidad', type: 'number', required: true, min: 1 },
+      { name: 'costo_unitario', label: 'Costo unitario', type: 'number', required: true },
+      { name: 'factura_proveedor', label: 'N.º factura proveedor', type: 'text' },
+      { name: 'lote', label: 'Lote', type: 'text' },
+    ],
+    onCreate: (db, row) => db.prepare('UPDATE productos SET stock = stock + ? WHERE id = ?').run(row.cantidad, row.producto_id),
+    onDelete: (db, row) => {
+      const p = db.prepare('SELECT nombre, stock FROM productos WHERE id = ?').get(row.producto_id);
+      if (p && p.stock < row.cantidad) throw new Error(`No se puede eliminar: ${p.nombre} solo tiene ${p.stock} en stock`);
+      db.prepare('UPDATE productos SET stock = stock - ? WHERE id = ?').run(row.cantidad, row.producto_id);
+    },
   },
 };
 

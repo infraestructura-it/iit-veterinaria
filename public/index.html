@@ -7,36 +7,39 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <aside class="sidebar" id="sidebar">
-    <div class="brand">
-      <span class="logo">🐾</span>
-      <div><strong>IIT Veterinaria</strong><small>Cuidado animal</small></div>
-    </div>
-    <nav id="menu">
-      <p class="menu-title">Principal</p>
-      <a data-view="dashboard" href="#dashboard">📊 Inicio</a>
-      <a data-view="citas" href="#citas">📅 Agenda</a>
-      <a data-view="consultas" href="#consultas">🩺 Consultas</a>
-      <p class="menu-title">Clínica</p>
-      <a data-view="pacientes" href="#pacientes">🐶 Pacientes</a>
-      <a data-view="propietarios" href="#propietarios">👤 Propietarios</a>
-      <a data-view="vacunas" href="#vacunas">💉 Vacunación</a>
-      <a data-view="hospitalizaciones" href="#hospitalizaciones">🏥 Hospitalización</a>
-      <a data-view="peluqueria" href="#peluqueria">✂️ Peluquería</a>
-      <p class="menu-title">Administración</p>
-      <a data-view="productos" href="#productos">📦 Inventario</a>
-      <a data-view="ventas" href="#ventas">💵 Ventas</a>
-      <a data-view="reportes" href="#reportes">📈 Reportes</a>
-    </nav>
-  </aside>
+  <!-- Inicio de sesión -->
+  <section id="login" class="login hidden">
+    <form id="login-form" class="login-card">
+      <div class="login-brand"><span class="logo">🐾</span><strong>IIT Veterinaria</strong><small>Software de gestión veterinaria</small></div>
+      <label>Usuario<input name="usuario" autocomplete="username" required /></label>
+      <label>Contraseña<input name="password" type="password" autocomplete="current-password" required /></label>
+      <div id="login-error" class="errors"></div>
+      <button class="btn primary" type="submit">Iniciar sesión</button>
+      <a class="link-reserva" href="reservar.html">¿Eres cliente? Reserva tu cita en línea →</a>
+    </form>
+  </section>
 
-  <div class="main">
-    <header class="topbar">
-      <button class="hamburger" id="toggle" aria-label="Menú">☰</button>
-      <h1 id="title">Inicio</h1>
-      <span class="user">Infraestructura-IT</span>
-    </header>
-    <main id="view"></main>
+  <div id="shell" class="hidden">
+    <aside class="sidebar no-print" id="sidebar">
+      <div class="brand">
+        <span class="logo">🐾</span>
+        <div><strong id="brand-name">IIT Veterinaria</strong><small>Cuidado animal</small></div>
+      </div>
+      <nav id="menu"></nav>
+    </aside>
+
+    <div class="main">
+      <header class="topbar no-print">
+        <button class="hamburger" id="toggle" aria-label="Menú">☰</button>
+        <h1 id="title">Inicio</h1>
+        <div class="user-box">
+          <span id="user-name"></span>
+          <button class="btn sm ghost" id="btn-password" title="Cambiar contraseña">🔑</button>
+          <button class="btn sm ghost" id="btn-logout">Salir</button>
+        </div>
+      </header>
+      <main id="view"></main>
+    </div>
   </div>
 
   <dialog id="modal">
@@ -46,7 +49,7 @@
       <div id="form-fields" class="grid"></div>
       <div class="actions">
         <button type="button" class="btn ghost" id="cancel">Cancelar</button>
-        <button type="submit" class="btn primary">Guardar</button>
+        <button type="submit" class="btn primary" id="submit">Guardar</button>
       </div>
     </form>
   </dialog>

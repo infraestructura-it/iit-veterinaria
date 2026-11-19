@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reserva tu cita</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { display: block; background: linear-gradient(180deg, #0d47a1 0, #1565c0 300px, var(--bg) 300px) no-repeat, var(--bg); }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+    .hero { color: #fff; text-align: center; margin-bottom: 20px; }
+    .hero h1 { margin: 0 0 4px; }
+    .hero p { margin: 0; opacity: .85; }
+    .box { background: #fff; border-radius: 14px; padding: 24px; box-shadow: 0 12px 40px rgba(0,0,0,.12); }
+    .box h2 { font-size: 16px; color: var(--blue-dark); margin: 18px 0 10px; }
+    .box h2:first-child { margin-top: 0; }
+    .slots { display: flex; flex-wrap: wrap; gap: 8px; }
+    .slot { border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 8px 12px; cursor: pointer; font: inherit; }
+    .slot.sel { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .ok { background: #e6f4ea; color: var(--ok); padding: 16px; border-radius: 10px; text-align: center; font-weight: 600; }
+    footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero"><div style="font-size:42px">🐾</div><h1 id="clinica">Reserva tu cita</h1><p>Agenda en línea · la clínica confirmará tu cita</p></div>
+    <form class="box" id="f">
+      <h2>1. Tus datos</h2>
+      <div class="grid">
+        <label>Nombre completo *<input name="nombre" required maxlength="120" /></label>
+        <label>Documento *<input name="documento" required maxlength="30" /></label>
+        <label>Celular *<input name="telefono" required maxlength="30" inputmode="tel" /></label>
+        <label>Correo<input name="email" type="email" maxlength="120" /></label>
+      </div>
+      <h2>2. Tu mascota</h2>
+      <div class="grid">
+        <label>Nombre *<input name="mascota" required maxlength="60" /></label>
+        <label>Especie *<select name="especie" required><option value="">— Seleccione —</option><option>Canino</option><option>Felino</option><option>Ave</option><option>Roedor</option><option>Reptil</option><option>Equino</option><option>Otro</option></select></label>
+        <label class="full">Motivo de la consulta *<textarea name="motivo" required maxlength="300"></textarea></label>
+      </div>
+      <h2>3. Fecha y hora</h2>
+      <label>Fecha *<input type="date" name="fecha" id="fecha" required /></label>
+      <div class="slots" id="slots" style="margin-top:10px"></div>
+      <div class="errors" id="err" style="margin-top:12px"></div>
+      <div class="actions"><button class="btn primary" type="submit">Solicitar cita</button></div>
+    </form>
+    <footer id="contacto"></footer>
+  </div>
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const hoy = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    let hora = '';
+    $('#fecha').min = hoy;
+    $('#fecha').value = hoy;
+
+    fetch('/api/publico/clinica').then((r) => r.json()).then((c) => {
+      $('#clinica').textContent = `Reserva tu cita en ${c.nombre_clinica}`;
+      document.title = `Reservar cita · ${c.nombre_clinica}`;
+      $('#contacto').innerHTML = [c.direccion, c.telefono && `Tel. ${c.telefono}`, c.email].filter(Boolean).map(esc).join(' · ');
+    });
+
+    async function cargarHoras(auto = false) {
+      hora = '';
+      $('#slots').innerHTML = '<small>Cargando horarios...</small>';
+      const r = await fetch(`/api/publico/disponibilidad?fecha=${$('#fecha').value}`);
+      const d = await r.json();
+      if (!r.ok) { $('#slots').innerHTML = `<small class="errors">${esc((d.errors || []).join(', '))}</small>`; return; }
+      if (!d.horas.length && auto) {
+        // Si hoy ya no hay cupos, ofrece mañana automáticamente
+        const m = new Date(`${$('#fecha').value}T12:00:00`); m.setDate(m.getDate() + 1);
+        $('#fecha').value = m.toISOString().slice(0, 10);
+        return cargarHoras();
+      }
+      $('#slots').innerHTML = d.horas.length
+        ? d.horas.map((h) => `<button type="button" class="slot" data-h="${h}">${h}</button>`).join('')
+        : '<small>No hay horarios disponibles ese día. Pruebe otra fecha.</small>';
+    }
+    $('#fecha').onchange = () => cargarHoras();
+    $('#slots').onclick = (e) => {
+      if (!e.target.dataset.h) return;
+      hora = e.target.dataset.h;
+      document.querySelectorAll('.slot').forEach((b) => b.classList.toggle('sel', b === e.target));
+    };
+    $('#f').onsubmit = async (e) => {
+      e.preventDefault();
+      $('#err').textContent = '';
+      if (!hora) { $('#err').textContent = 'Seleccione una hora'; return; }
+      const body = { ...Object.fromEntries(new FormData(e.target)), hora };
+      const r = await fetch('/api/publico/reservar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) { $('#err').textContent = (d.errors || ['No fue posible reservar']).join(' · '); cargarHoras(); return; }
+      $('#f').innerHTML = `<div class="ok">✅ ${esc(d.mensaje)}</div>`;
+    };
+    cargarHoras(true);
+  </script>
+</body>
+</html>

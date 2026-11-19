@@ -1,51 +1,113 @@
 /* IIT Veterinaria — interfaz SPA sin dependencias */
-const $ = (s) => document.querySelector(s);
+const $ = (s, el = document) => el.querySelector(s);
 const view = $('#view');
 let META = {};
+let USER = null;
+let CONFIG = {};
+let refreshTimer = null;
 const refCache = {};
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => Number(n || 0).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+const hoyISO = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const ahoraHM = () => new Date().toTimeString().slice(0, 5);
+const errText = (e) => (e && (e.errors || [e.error]).filter(Boolean).join(' · ')) || 'Error inesperado';
 
 async function api(url, opts = {}) {
-  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', ...opts });
+  if (res.status === 401 && !url.endsWith('/api/login')) { showLogin(); throw { error: 'Sesión expirada' }; }
   if (res.status === 204) return null;
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw data;
   return data;
 }
+const post = (url, body) => api(url, { method: 'POST', body: JSON.stringify(body || {}) });
 
+function toast(msg, ok = false) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;bottom:20px;right:20px;background:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:99;color:${ok ? 'var(--ok)' : 'var(--danger)'}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+const BADGES = {
+  ok: ['Atendida', 'Dado de alta', 'Confirmada', 'Pagada', 'Finalizada', 'Finalizado', 'Facturado', 'Hospedado', 'Activo'],
+  bad: ['Cancelada', 'Cancelado', 'No asistió', 'Fallecido', 'Anulada', 'Urgente', 'Vencida', 'Vencido', 'Inactivo'],
+  warn: ['Hospitalizado', 'En observación', 'Pendiente', 'Solicitada', 'En sala de espera', 'En consulta', 'En curso', 'Prioritario', 'Borrador', 'Por vencer'],
+};
 function badge(v) {
-  const map = { Atendida: 'ok', 'Dado de alta': 'ok', Confirmada: 'ok', Cancelada: 'bad', 'No asistió': 'bad', Fallecido: 'bad', Hospitalizado: 'warn', 'En observación': 'warn' };
-  return `<span class="badge ${map[v] || ''}">${esc(v)}</span>`;
+  const cls = Object.keys(BADGES).find((k) => BADGES[k].includes(v)) || '';
+  return `<span class="badge ${cls}">${esc(v)}</span>`;
 }
 
-function cell(f, row) {
-  const v = row[f.name];
-  if (f.type === 'ref') return esc(row[`${f.name}_label`]);
-  if (f.type === 'select' && f.name === 'estado') return badge(v);
-  if (['precio', 'total'].includes(f.name)) return money(v);
-  if (f.type === 'textarea') return esc(String(v ?? '').slice(0, 60));
-  return esc(v);
+const canWrite = (name) => { const w = META[name]?.write; return !w || w.includes(USER.rol); };
+
+/* ---------- Menú ---------- */
+const MENU = [
+  ['Principal', [['dashboard', '📊 Inicio'], ['sala', '🪑 Sala de espera'], ['citas', '📅 Agenda'], ['recordatorios', '🔔 Recordatorios']]],
+  ['Clínica', [['pacientes', '🐶 Pacientes'], ['propietarios', '👤 Propietarios'], ['consultas', '🩺 Consultas'], ['recetas', '💊 Recetas'],
+    ['vacunas', '💉 Vacunación'], ['cirugias', '🔪 Cirugías'], ['hospitalizaciones', '🏥 Hospitalización'], ['guarderia', '🏠 Guardería'],
+    ['peluqueria', '✂️ Peluquería'], ['consentimientos', '✍️ Consentimientos']]],
+  ['Administración', [['facturas', '🧾 Facturación'], ['productos', '📦 Inventario'], ['proveedores', '🚚 Proveedores'], ['compras', '🛒 Compras'], ['reportes', '📈 Reportes']]],
+  ['Sistema', [['usuarios', '👥 Usuarios'], ['configuracion', '⚙️ Configuración']], ['admin']],
+];
+
+function renderMenu() {
+  $('#menu').innerHTML = MENU.filter(([, , roles]) => !roles || roles.includes(USER.rol))
+    .map(([title, items]) => `<p class="menu-title">${title}</p>${items.map(([v, l]) => `<a data-view="${v}" href="#${v}">${l}</a>`).join('')}`).join('');
 }
+
+/* ---------- Sesión ---------- */
+function showLogin() {
+  USER = null;
+  $('#shell').classList.add('hidden');
+  $('#login').classList.remove('hidden');
+  clearInterval(refreshTimer);
+}
+
+async function startApp(user) {
+  USER = user;
+  [META, CONFIG] = await Promise.all([api('/api/meta'), api('/api/configuracion')]);
+  $('#brand-name').textContent = CONFIG.nombre_clinica || 'IIT Veterinaria';
+  $('#user-name').innerHTML = `${esc(USER.nombre)} <span class="rol">${esc(USER.rol)}</span>`;
+  renderMenu();
+  $('#login').classList.add('hidden');
+  $('#shell').classList.remove('hidden');
+  route();
+}
+
+$('#login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  $('#login-error').textContent = '';
+  try { await startApp(await post('/api/login', Object.fromEntries(new FormData(e.target)))); e.target.reset(); }
+  catch (err) { $('#login-error').textContent = errText(err); }
+};
+$('#btn-logout').onclick = async () => { await post('/api/logout').catch(() => {}); location.hash = ''; showLogin(); };
+$('#btn-password').onclick = () => openCustomForm('Cambiar contraseña', [
+  { name: 'actual', label: 'Contraseña actual', type: 'password', required: true },
+  { name: 'nueva', label: 'Nueva contraseña (mín. 8)', type: 'password', required: true },
+], {}, async (body) => { await api('/api/me/password', { method: 'PUT', body: JSON.stringify(body) }); toast('Contraseña actualizada', true); });
 
 /* ---------- Router ---------- */
 const views = {
-  dashboard: renderDashboard,
-  reportes: renderReportes,
-  historia: renderHistoria,
+  dashboard: renderDashboard, sala: renderSala, recordatorios: renderRecordatorios, reportes: renderReportes,
+  historia: renderHistoria, facturas: renderFacturas, usuarios: renderUsuarios, configuracion: renderConfig, imprimir: renderImprimir,
 };
 
 async function route() {
-  const [name, param] = (location.hash.slice(1) || 'dashboard').split('/');
-  document.querySelectorAll('#menu a').forEach((a) => a.classList.toggle('active', a.dataset.view === name || (name === 'historia' && a.dataset.view === 'pacientes')));
+  if (!USER) return;
+  clearInterval(refreshTimer);
+  const [name, ...params] = (location.hash.slice(1) || 'dashboard').split('/');
+  const active = { historia: 'pacientes', imprimir: params[0] === 'factura' ? 'facturas' : params[0] === 'historia' ? 'pacientes' : params[0] };
+  document.querySelectorAll('#menu a').forEach((a) => a.classList.toggle('active', a.dataset.view === (active[name] || name)));
   $('#sidebar').classList.remove('open');
   try {
-    if (views[name]) await views[name](param);
+    if (views[name]) await views[name](...params);
     else if (META[name]) await renderList(name);
     else view.innerHTML = '<p class="empty">Módulo no encontrado</p>';
   } catch (e) {
-    view.innerHTML = `<p class="errors">Error: ${esc(e.error || e.message || e)}</p>`;
+    view.innerHTML = `<p class="errors">Error: ${esc(errText(e))}</p>`;
   }
 }
 
@@ -53,19 +115,24 @@ async function route() {
 async function renderDashboard() {
   $('#title').textContent = 'Inicio';
   const d = await api('/api/dashboard');
-  const rows = (list, fn) => list.length ? list.map(fn).join('') : '<tr><td class="empty">Sin registros</td></tr>';
+  const rows = (list, fn) => (list.length ? list.map(fn).join('') : '<tr><td class="empty">Sin registros</td></tr>');
+  const card = (n, l, href) => `<a class="card" href="${href}" style="text-decoration:none"><div class="num">${n}</div><div class="lbl">${l}</div></a>`;
   view.innerHTML = `
     <div class="cards">
-      <div class="card"><div class="num">${d.totales.citas_hoy}</div><div class="lbl">Citas hoy</div></div>
-      <div class="card"><div class="num">${d.totales.pacientes}</div><div class="lbl">Pacientes</div></div>
-      <div class="card"><div class="num">${d.totales.propietarios}</div><div class="lbl">Propietarios</div></div>
-      <div class="card"><div class="num">${d.totales.hospitalizados}</div><div class="lbl">Hospitalizados</div></div>
-      <div class="card"><div class="num">${money(d.ventas_mes)}</div><div class="lbl">Ventas del mes</div></div>
+      ${card(d.totales.citas_hoy, 'Citas hoy', '#citas')}
+      ${card(d.totales.en_espera, 'En sala de espera', '#sala')}
+      ${card(d.totales.solicitudes, 'Solicitudes en línea', '#citas')}
+      ${card(d.totales.cirugias_hoy, 'Cirugías hoy', '#cirugias')}
+      ${card(d.totales.hospitalizados, 'Hospitalizados', '#hospitalizaciones')}
+      ${card(d.totales.en_guarderia, 'En guardería', '#guarderia')}
+      ${card(money(d.ventas_mes), 'Ventas del mes', '#facturas')}
+      ${card(money(d.por_cobrar), 'Por cobrar', '#facturas')}
     </div>
     <div class="panels">
       <div class="panel"><h3>📅 Agenda de hoy (${esc(d.fecha)})</h3><table>${rows(d.citas_hoy, (c) => `<tr><td>${esc(c.hora)}</td><td>${esc(c.paciente_id_label)}</td><td>${esc(c.motivo)}</td><td>${badge(c.estado)}</td></tr>`)}</table></div>
       <div class="panel"><h3>💉 Vacunas próximas / vencidas</h3><table>${rows(d.vacunas_pendientes, (v) => `<tr><td>${esc(v.proxima_dosis)}</td><td>${esc(v.paciente_id_label)}</td><td>${esc(v.vacuna)}</td></tr>`)}</table></div>
       <div class="panel"><h3>📦 Stock bajo</h3><table>${rows(d.stock_bajo, (p) => `<tr><td>${esc(p.nombre)}</td><td><span class="badge bad">${p.stock} / mín ${p.stock_minimo}</span></td></tr>`)}</table></div>
+      <div class="panel"><h3>⏳ Productos por vencer (30 días)</h3><table>${rows(d.por_vencer, (p) => `<tr><td>${esc(p.nombre)}</td><td>${badge(p.vencimiento < d.fecha ? 'Vencido' : 'Por vencer')} ${esc(p.vencimiento)}</td></tr>`)}</table></div>
     </div>`;
 }
 
@@ -73,94 +140,309 @@ async function renderDashboard() {
 async function renderList(name) {
   const def = META[name];
   $('#title').textContent = def.label;
-  const cols = def.fields.filter((f) => f.type !== 'textarea' || ['diagnostico'].includes(f.name)).slice(0, 7);
+  const cols = def.fields.filter((f) => !['textarea', 'signature'].includes(f.type) || f.name === 'diagnostico').slice(0, 7);
+  const write = canWrite(name);
   view.innerHTML = `
     <div class="toolbar">
       <input id="q" placeholder="Buscar ${esc(def.label.toLowerCase())}..." />
-      <button class="btn primary" id="new">+ ${def.fem ? 'Nueva' : 'Nuevo'} ${esc(def.singular.toLowerCase())}</button>
+      <a class="btn ghost" id="export" href="/api/${name}/export">⬇ Exportar CSV</a>
+      ${write ? `<button class="btn primary" id="new">+ ${def.fem ? 'Nueva' : 'Nuevo'} ${esc(def.singular.toLowerCase())}</button>` : ''}
     </div>
     <div class="table-wrap"><table>
       <thead><tr>${cols.map((f) => `<th>${esc(f.label)}</th>`).join('')}<th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>`;
 
+  const cell = (f, r) => {
+    const v = r[f.name];
+    if (f.type === 'ref') return esc(r[`${f.name}_label`]);
+    if (['estado', 'triage'].includes(f.name)) return badge(v);
+    if (['precio', 'total', 'tarifa_dia', 'costo_unitario'].includes(f.name)) return money(v);
+    if (f.type === 'textarea') return esc(String(v ?? '').slice(0, 60));
+    return esc(v);
+  };
+
   const load = async () => {
     const q = $('#q').value;
+    $('#export').href = `/api/${name}/export${q ? `?q=${encodeURIComponent(q)}` : ''}`;
     const data = await api(`/api/${name}${q ? `?q=${encodeURIComponent(q)}` : ''}`);
     $('#rows').innerHTML = data.length ? data.map((r) => `
       <tr>${cols.map((f) => `<td>${cell(f, r)}</td>`).join('')}
         <td class="acts">
           ${name === 'pacientes' ? `<a class="btn sm ghost" href="#historia/${r.id}">Historia</a>` : ''}
-          <button class="btn sm ghost" data-edit="${r.id}">Editar</button>
-          <button class="btn sm danger" data-del="${r.id}">Eliminar</button>
+          ${def.print ? `<a class="btn sm ghost" href="#imprimir/${name}/${r.id}">Imprimir</a>` : ''}
+          ${write ? `<button class="btn sm ghost" data-edit="${r.id}">Editar</button><button class="btn sm danger" data-del="${r.id}">Eliminar</button>` : ''}
         </td></tr>`).join('') : `<tr><td colspan="${cols.length + 1}" class="empty">No hay registros</td></tr>`;
   };
 
   let t;
   $('#q').oninput = () => { clearTimeout(t); t = setTimeout(load, 250); };
-  $('#new').onclick = () => openForm(name, null, load);
+  if (write) $('#new').onclick = () => openForm(name, null, load);
   $('#rows').onclick = async (e) => {
-    const id = e.target.dataset.edit || e.target.dataset.del;
-    if (!id) return;
-    if (e.target.dataset.edit) openForm(name, await api(`/api/${name}/${id}`), load);
-    else {
+    const { edit, del } = e.target.dataset;
+    if (edit) openForm(name, await api(`/api/${name}/${edit}`), load);
+    if (del) {
       if (!confirm('¿Eliminar este registro?')) return;
-      try { await api(`/api/${name}/${id}`, { method: 'DELETE' }); delete refCache[name]; load(); }
-      catch (err) { showToast((err.errors || [err.error]).join(', ')); }
+      try { await api(`/api/${name}/${del}`, { method: 'DELETE' }); delete refCache[name]; load(); } catch (err) { toast(errText(err)); }
     }
   };
   await load();
 }
 
-function showToast(msg) {
-  const el = document.createElement('div');
-  el.className = 'errors';
-  el.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:99';
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 4000);
-}
-
-/* ---------- Formulario ---------- */
+/* ---------- Formularios ---------- */
 async function refOptions(ref) {
   if (!refCache[ref]) refCache[ref] = await api(`/api/${ref}`);
   return refCache[ref];
 }
 
+function signaturePad(container, existing) {
+  container.innerHTML = `<div class="sig-wrap"><canvas></canvas><button type="button" class="btn sm ghost">Limpiar</button></div>
+    ${existing ? `<small>Firma actual:</small><img class="sig-img" src="${esc(existing)}" alt="firma" /><small> (dibuje para reemplazarla)</small>` : '<small>Firme dentro del recuadro con el mouse o el dedo</small>'}`;
+  const canvas = $('canvas', container);
+  const ctx = canvas.getContext('2d');
+  let drawing = false;
+  let dirty = false;
+  const fit = () => { const r = canvas.getBoundingClientRect(); canvas.width = r.width; canvas.height = r.height; ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0d47a1'; };
+  requestAnimationFrame(fit);
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  canvas.onpointerdown = (e) => { drawing = true; dirty = true; canvas.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.moveTo(...pos(e)); };
+  canvas.onpointermove = (e) => { if (drawing) { ctx.lineTo(...pos(e)); ctx.stroke(); } };
+  canvas.onpointerup = () => { drawing = false; };
+  $('button', container).onclick = () => { ctx.clearRect(0, 0, canvas.width, canvas.height); dirty = false; };
+  return () => (dirty ? canvas.toDataURL('image/png') : undefined);
+}
+
+function fieldInput(f, val, opts, disabled) {
+  const attrs = `name="${f.name}" ${f.required ? 'required' : ''} ${disabled ? 'disabled' : ''}`;
+  if (f.type === 'textarea') return `<textarea ${attrs}>${esc(val)}</textarea>`;
+  if (f.type === 'select') return `<select ${attrs}><option value="">— Seleccione —</option>${f.options.map((o) => `<option ${String(o) === String(val) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  if (f.type === 'ref') {
+    const disp = META[f.ref].display;
+    return `<select ${attrs}><option value="">— Seleccione —</option>${opts.map((o) => `<option value="${o.id}" ${o.id == val ? 'selected' : ''}>${esc(o[disp])}${o.propietario_id_label ? ` (${esc(o.propietario_id_label)})` : ''}</option>`).join('')}</select>`;
+  }
+  if (f.type === 'signature') return `<div data-sig="${f.name}"></div>`;
+  const type = f.type === 'number' ? 'number" step="any' : f.type;
+  return `<input type="${type}" ${attrs} value="${esc(val)}" />`;
+}
+
 async function openForm(name, row, onSaved, preset = {}) {
   const def = META[name];
+  $('#modal').classList.remove('wide');
   $('#form-title').textContent = `${row ? 'Editar' : def.fem ? 'Nueva' : 'Nuevo'} ${def.singular.toLowerCase()}`;
   $('#form-errors').textContent = '';
   const html = [];
   for (const f of def.fields) {
-    const val = row ? row[f.name] : preset[f.name] ?? f.default ?? (f.type === 'date' && /fecha$|fecha_aplicacion|fecha_ingreso/.test(f.name) ? new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10) : '');
-    const req = f.required ? 'required' : '';
-    let input;
-    if (f.type === 'textarea') input = `<textarea name="${f.name}" ${req}>${esc(val)}</textarea>`;
-    else if (f.type === 'select') input = `<select name="${f.name}" ${req}><option value="">— Seleccione —</option>${f.options.map((o) => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-    else if (f.type === 'ref') {
-      const opts = await refOptions(f.ref);
-      const disp = META[f.ref].display;
-      input = `<select name="${f.name}" ${req}><option value="">— Seleccione —</option>${opts.map((o) => `<option value="${o.id}" ${o.id == val ? 'selected' : ''}>${esc(o[disp])}${o.propietario_id_label ? ` (${esc(o.propietario_id_label)})` : ''}</option>`).join('')}</select>`;
-    } else input = `<input type="${f.type === 'number' ? 'number" step="any' : f.type}" name="${f.name}" value="${esc(val)}" ${req} />`;
-    html.push(`<label class="${f.type === 'textarea' ? 'full' : ''}"><span class="${f.required ? 'req' : ''}">${esc(f.label)}</span>${input}</label>`);
+    const isFecha = f.type === 'date' && ['fecha', 'fecha_aplicacion', 'fecha_ingreso'].includes(f.name);
+    const val = row ? row[f.name] : preset[f.name] ?? f.default ?? (isFecha ? hoyISO() : '');
+    const opts = f.type === 'ref' ? await refOptions(f.ref) : null;
+    const full = ['textarea', 'signature'].includes(f.type);
+    const disabled = !!row && (def.immutable || []).includes(f.name);
+    // La firma no va dentro de <label>: un clic en el lienzo activaría el botón "Limpiar".
+    const tag = f.type === 'signature' ? 'div' : 'label';
+    html.push(`<${tag} class="${full ? 'full' : ''}"><span class="${f.required ? 'req' : ''}">${esc(f.label)}</span>${fieldInput(f, val, opts, disabled)}</${tag}>`);
   }
   $('#form-fields').innerHTML = html.join('');
+  const sigs = {};
+  document.querySelectorAll('[data-sig]').forEach((el) => { sigs[el.dataset.sig] = signaturePad(el, row?.[el.dataset.sig]); });
+  bindModal(async (form) => {
+    const body = Object.fromEntries(new FormData(form));
+    for (const [k, get] of Object.entries(sigs)) { const v = get(); if (v) body[k] = v; }
+    await api(`/api/${name}${row ? `/${row.id}` : ''}`, { method: row ? 'PUT' : 'POST', body: JSON.stringify(body) });
+    delete refCache[name];
+    onSaved && onSaved();
+  });
+}
+
+/** Formulario simple con campos propios (no ligados a un recurso). */
+function openCustomForm(title, fields, values, onSubmit) {
+  $('#modal').classList.remove('wide');
+  $('#form-title').textContent = title;
+  $('#form-errors').textContent = '';
+  $('#form-fields').innerHTML = fields.map((f) => `<label><span class="${f.required ? 'req' : ''}">${esc(f.label)}</span>${
+    f.type === 'select'
+      ? `<select name="${f.name}" ${f.required ? 'required' : ''}>${f.options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(v)}" ${String(v) === String(values[f.name]) ? 'selected' : ''}>${esc(l)}</option>`; }).join('')}</select>`
+      : `<input type="${f.type || 'text'}" name="${f.name}" value="${f.type === 'password' ? '' : esc(values[f.name])}" ${f.required ? 'required' : ''} />`}</label>`).join('');
+  bindModal(async (form) => onSubmit(Object.fromEntries(new FormData(form))));
+}
+
+function bindModal(onSubmit) {
   const modal = $('#modal');
   $('#cancel').onclick = () => modal.close();
   $('#form').onsubmit = async (e) => {
     e.preventDefault();
-    const body = Object.fromEntries(new FormData(e.target));
-    try {
-      await api(`/api/${name}${row ? `/${row.id}` : ''}`, { method: row ? 'PUT' : 'POST', body: JSON.stringify(body) });
-      delete refCache[name];
-      modal.close();
-      onSaved && onSaved();
-    } catch (err) {
-      $('#form-errors').textContent = (err.errors || [err.error]).join(' · ');
-    }
+    try { await onSubmit(e.target); modal.close(); } catch (err) { $('#form-errors').textContent = errText(err); }
   };
   modal.showModal();
+}
+
+/* ---------- Sala de espera (flujo con triage) ---------- */
+async function renderSala() {
+  $('#title').textContent = 'Sala de espera';
+  const fecha = hoyISO();
+  const cols = [
+    ['Por llegar', ['Programada', 'Confirmada']],
+    ['En sala de espera', ['En sala de espera']],
+    ['En consulta', ['En consulta']],
+    ['Finalizadas', ['Atendida', 'No asistió']],
+  ];
+  const draw = async () => {
+    const citas = await api(`/api/sala-espera?fecha=${fecha}`);
+    view.innerHTML = `<p class="kpi-sub no-print">Citas de hoy (${fecha}) · se actualiza cada 30 segundos · prioridad: Urgente → Prioritario → Normal</p>
+      <div class="kanban">${cols.map(([title, estados]) => {
+        const list = citas.filter((c) => estados.includes(c.estado));
+        return `<div class="kcol"><h3>${title}<span class="badge">${list.length}</span></h3>${list.map((c) => `
+          <div class="kcard ${esc(c.triage)}">
+            <strong>${esc(c.paciente_id_label)}</strong> · ${esc(c.hora)} ${c.hora_llegada ? `<small>(llegó ${esc(c.hora_llegada)})</small>` : ''}<br>
+            ${esc(c.motivo)} ${c.veterinario ? `<br><small>${esc(c.veterinario)}</small>` : ''}
+            <div class="row">
+              <select data-triage="${c.id}">${['Normal', 'Prioritario', 'Urgente'].map((t) => `<option ${t === c.triage ? 'selected' : ''}>${t}</option>`).join('')}</select>
+              ${['Programada', 'Confirmada'].includes(c.estado) ? `<button class="btn sm primary" data-st="${c.id}|En sala de espera|llegada">Llegó</button><button class="btn sm danger" data-st="${c.id}|No asistió">No asistió</button>` : ''}
+              ${c.estado === 'En sala de espera' ? `<button class="btn sm primary" data-st="${c.id}|En consulta">Pasar a consulta</button>` : ''}
+              ${c.estado === 'En consulta' ? `<button class="btn sm primary" data-st="${c.id}|Atendida">Finalizar</button><a class="btn sm ghost" href="#historia/${c.paciente_id}">Historia</a>` : ''}
+              ${['Atendida', 'No asistió'].includes(c.estado) ? badge(c.estado) : ''}
+            </div>
+          </div>`).join('') || '<p class="empty">—</p>'}</div>`;
+      }).join('')}</div>`;
+    view.querySelectorAll('[data-st]').forEach((b) => {
+      b.onclick = async () => {
+        const [id, estado, llegada] = b.dataset.st.split('|');
+        try { await api(`/api/citas/${id}`, { method: 'PUT', body: JSON.stringify({ estado, ...(llegada ? { hora_llegada: ahoraHM() } : {}) }) }); draw(); } catch (e) { toast(errText(e)); }
+      };
+    });
+    view.querySelectorAll('[data-triage]').forEach((s) => {
+      s.onchange = async () => { await api(`/api/citas/${s.dataset.triage}`, { method: 'PUT', body: JSON.stringify({ triage: s.value }) }); draw(); };
+    });
+  };
+  await draw();
+  refreshTimer = setInterval(() => { if (location.hash === '#sala' && !$('#modal').open) draw().catch(() => {}); }, 30000);
+}
+
+/* ---------- Recordatorios ---------- */
+async function renderRecordatorios() {
+  $('#title').textContent = 'Recordatorios';
+  view.innerHTML = `<div class="toolbar filters">
+      <label>Próximos <select id="dias">${[3, 7, 15, 30].map((d) => `<option ${d === 7 ? 'selected' : ''}>${d}</option>`).join('')}</select> días</label>
+      <span class="kpi-sub">Vacunas y desparasitaciones pendientes (incluye vencidas) y citas de hoy a 2 días.</span>
+    </div><div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Fecha</th><th>Paciente</th><th>Propietario</th><th>Detalle</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
+  const load = async () => {
+    const list = await api(`/api/recordatorios?dias=${$('#dias').value}`);
+    $('#rows').innerHTML = list.length ? list.map((r, i) => `<tr>
+      <td>${badge(r.tipo)} ${r.vencida ? badge('Vencida') : ''}</td><td>${esc(r.fecha)} ${esc(r.hora || '')}</td><td>${esc(r.paciente)}</td>
+      <td>${esc(r.propietario)}<br><small>${esc(r.telefono)}</small></td><td>${esc(r.detalle)}</td>
+      <td class="acts">${r.whatsapp ? `<a class="btn sm wa" target="_blank" rel="noopener" href="${esc(r.whatsapp)}">WhatsApp</a>` : '<small>Sin celular válido</small>'}
+        <button class="btn sm ghost" data-copy="${i}">Copiar</button></td></tr>`).join('') : '<tr><td colspan="6" class="empty">No hay recordatorios pendientes</td></tr>';
+    $('#rows').onclick = (e) => { const i = e.target.dataset.copy; if (i !== undefined) navigator.clipboard.writeText(list[i].mensaje).then(() => toast('Mensaje copiado', true)); };
+  };
+  $('#dias').onchange = load;
+  await load();
+}
+
+/* ---------- Facturación ---------- */
+async function renderFacturas() {
+  $('#title').textContent = 'Facturación';
+  view.innerHTML = `<div class="toolbar filters">
+      <input id="q" placeholder="Buscar por número, cliente o documento..." style="flex:1" />
+      <select id="ftipo"><option value="">Todos los tipos</option><option>Factura</option><option>Presupuesto</option></select>
+      <select id="festado"><option value="">Todos los estados</option>${['Pagada', 'Pendiente', 'Borrador', 'Facturado', 'Anulada'].map((s) => `<option>${s}</option>`).join('')}</select>
+      <button class="btn ghost" id="new-p">+ Presupuesto</button>
+      <button class="btn primary" id="new-f">+ Factura</button>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>Número</th><th>Fecha</th><th>Cliente</th><th>Paciente</th><th>Total</th><th>Pago</th><th>Estado</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
+  const load = async () => {
+    const qs = new URLSearchParams({ q: $('#q').value, tipo: $('#ftipo').value, estado: $('#festado').value });
+    const list = await api(`/api/facturas?${qs}`);
+    $('#rows').innerHTML = list.length ? list.map((f) => `<tr>
+      <td><strong>${esc(f.numero)}</strong></td><td>${esc(f.fecha)}</td><td>${esc(f.propietario_nombre)}</td><td>${esc(f.paciente_nombre)}</td>
+      <td>${money(f.total)}</td><td>${esc(f.metodo_pago || '—')}</td><td>${badge(f.estado)}</td>
+      <td class="acts"><a class="btn sm ghost" href="#imprimir/factura/${f.id}">Ver / Imprimir</a>
+        ${f.estado === 'Pendiente' ? `<button class="btn sm primary" data-pagar="${f.id}">Registrar pago</button>` : ''}
+        ${f.tipo === 'Presupuesto' && f.estado === 'Borrador' ? `<button class="btn sm primary" data-convertir="${f.id}">Facturar</button>` : ''}
+        ${USER.rol === 'admin' && !['Anulada', 'Facturado'].includes(f.estado) ? `<button class="btn sm danger" data-anular="${f.id}">Anular</button>` : ''}
+      </td></tr>`).join('') : '<tr><td colspan="8" class="empty">No hay documentos</td></tr>';
+  };
+  const METODOS = ['Efectivo', 'Tarjeta', 'Transferencia', 'Nequi', 'Daviplata'];
+  const metodoForm = (title, cb) => openCustomForm(title, [{ name: 'metodo_pago', label: 'Método de pago', type: 'select', required: true, options: METODOS }], {}, cb);
+  $('#rows').onclick = async (e) => {
+    const { pagar, convertir, anular } = e.target.dataset;
+    try {
+      if (pagar) metodoForm('Registrar pago', async (b) => { await post(`/api/facturas/${pagar}/pagar`, b); load(); });
+      if (convertir) metodoForm('Convertir presupuesto en factura', async (b) => { const f = await post(`/api/facturas/${convertir}/convertir`, b); toast(`Factura ${f.numero} creada`, true); load(); });
+      if (anular && confirm('¿Anular este documento? Si es una factura, el inventario se devuelve.')) { await post(`/api/facturas/${anular}/anular`); load(); }
+    } catch (err) { toast(errText(err)); }
+  };
+  let t;
+  $('#q').oninput = () => { clearTimeout(t); t = setTimeout(load, 250); };
+  $('#ftipo').onchange = load;
+  $('#festado').onchange = load;
+  $('#new-f').onclick = () => facturaForm('Factura', load);
+  $('#new-p').onclick = () => facturaForm('Presupuesto', load);
+  await load();
+}
+
+async function facturaForm(tipo, onSaved) {
+  const [clientes, pacientes, productos] = await Promise.all([api('/api/propietarios'), api('/api/pacientes'), api('/api/productos')]);
+  $('#modal').classList.add('wide');
+  $('#form-title').textContent = `Nueva ${tipo.toLowerCase()}`;
+  $('#form-errors').textContent = '';
+  const prodOpts = `<option value="">— Ítem libre —</option>${productos.map((p) => `<option value="${p.id}">${esc(p.nombre)}${p.categoria !== 'Servicio' ? ` (stock ${p.stock})` : ''}</option>`).join('')}`;
+  $('#form-fields').innerHTML = `
+    <label><span class="req">Cliente</span><select name="propietario_id" required><option value="">— Seleccione —</option>${clientes.map((c) => `<option value="${c.id}">${esc(c.nombre)} · ${esc(c.documento)}</option>`).join('')}</select></label>
+    <label><span>Paciente</span><select name="paciente_id"><option value="">—</option></select></label>
+    <label><span class="req">Fecha</span><input type="date" name="fecha" value="${hoyISO()}" required /></label>
+    ${tipo === 'Factura' ? '<label><span>Método de pago (vacío = pendiente)</span><select name="metodo_pago"><option value="">Pendiente de pago</option><option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option><option>Nequi</option><option>Daviplata</option></select></label>' : '<label></label>'}
+    <div class="full"><table class="items-table"><thead><tr><th style="width:28%">Producto / servicio</th><th>Descripción</th><th style="width:9%">Cant.</th><th style="width:14%">Precio</th><th style="width:9%">IVA %</th><th style="width:13%">Total</th><th></th></tr></thead><tbody id="items"></tbody></table>
+      <button type="button" class="btn sm ghost" id="add-item">+ Agregar ítem</button></div>
+    <label><span>Descuento ($)</span><input type="number" name="descuento" min="0" step="any" value="0" /></label>
+    <label><span>Notas</span><input name="notas" /></label>
+    <div class="full totales" id="totales"></div>`;
+  const tbody = $('#items');
+  const addRow = () => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><select data-k="producto_id">${prodOpts}</select></td><td><input data-k="descripcion" /></td>
+      <td><input data-k="cantidad" type="number" min="0" step="any" value="1" /></td><td><input data-k="precio" type="number" min="0" step="any" /></td>
+      <td><input data-k="iva" type="number" min="0" max="100" value="0" /></td><td data-total></td><td><button type="button" class="btn sm danger" data-rm>✕</button></td>`;
+    tbody.appendChild(tr);
+  };
+  const items = () => [...tbody.rows].map((tr) => Object.fromEntries([...tr.querySelectorAll('[data-k]')].map((i) => [i.dataset.k, i.value])));
+  const recalc = () => {
+    let sub = 0;
+    let iva = 0;
+    const its = items();
+    [...tbody.rows].forEach((tr, i) => {
+      const t = (Number(its[i].cantidad) || 0) * (Number(its[i].precio) || 0);
+      sub += t;
+      iva += (t * (Number(its[i].iva) || 0)) / 100;
+      $('[data-total]', tr).textContent = money(t);
+    });
+    const desc = Number($('[name=descuento]').value) || 0;
+    $('#totales').innerHTML = `<div><span>Subtotal</span><span>${money(sub)}</span></div><div><span>Descuento</span><span>− ${money(desc)}</span></div>
+      <div><span>IVA</span><span>${money(iva)}</span></div><div class="grand"><span>Total</span><span>${money(sub - desc + iva)}</span></div>`;
+  };
+  tbody.oninput = recalc;
+  tbody.onchange = (e) => {
+    if (e.target.dataset.k === 'producto_id') {
+      const p = productos.find((x) => x.id == e.target.value);
+      const tr = e.target.closest('tr');
+      if (p) { $('[data-k=descripcion]', tr).value = p.nombre; $('[data-k=precio]', tr).value = p.precio; $('[data-k=iva]', tr).value = p.iva || 0; }
+    }
+    recalc();
+  };
+  tbody.onclick = (e) => { if (e.target.dataset.rm !== undefined) { e.target.closest('tr').remove(); recalc(); } };
+  $('#add-item').onclick = () => { addRow(); recalc(); };
+  $('[name=descuento]').oninput = recalc;
+  $('[name=propietario_id]').onchange = (e) => {
+    $('[name=paciente_id]').innerHTML = `<option value="">—</option>${pacientes.filter((p) => p.propietario_id == e.target.value).map((p) => `<option value="${p.id}">${esc(p.nombre)}</option>`).join('')}`;
+  };
+  addRow();
+  recalc();
+  bindModal(async (form) => {
+    const body = Object.fromEntries(new FormData(form));
+    body.tipo = tipo;
+    body.items = items().filter((i) => i.descripcion || i.producto_id);
+    const f = await post('/api/facturas', body);
+    toast(`${tipo} ${f.numero} creada`, true);
+    onSaved();
+  });
 }
 
 /* ---------- Historia clínica ---------- */
@@ -168,50 +450,195 @@ async function renderHistoria(id) {
   const h = await api(`/api/pacientes/${id}/historia`);
   const p = h.paciente;
   $('#title').textContent = `Historia clínica — ${p.nombre}`;
+  const linkPrint = (tipo, rid) => `<a class="btn sm ghost no-print" href="#imprimir/${tipo}/${rid}">Imprimir</a>`;
   const eventos = [
-    ...h.consultas.map((c) => ({ f: c.fecha, t: '🩺 Consulta', d: `<strong>${esc(c.motivo)}</strong><br>Dx: ${esc(c.diagnostico) || '—'}<br>Tx: ${esc(c.tratamiento) || '—'}<br><small>T° ${esc(c.temperatura) || '—'} · Peso ${esc(c.peso) || '—'} kg · FC ${esc(c.frecuencia_cardiaca) || '—'} · ${esc(c.veterinario)}</small>` })),
+    ...h.consultas.map((c) => ({ f: c.fecha, t: '🩺 Consulta', d: `<strong>${esc(c.motivo)}</strong><br>Dx: ${esc(c.diagnostico) || '—'}<br>Plan: ${esc(c.tratamiento) || '—'}<br><small>T° ${esc(c.temperatura) || '—'} · Peso ${esc(c.peso) || '—'} kg · FC ${esc(c.frecuencia_cardiaca) || '—'} · ${esc(c.veterinario)}</small>` })),
+    ...h.recetas.map((r) => ({ f: r.fecha, t: '💊 Receta', d: `<pre style="white-space:pre-wrap;font-family:inherit;margin:0">${esc(r.medicamentos)}</pre><small>${esc(r.veterinario)}</small> ${linkPrint('recetas', r.id)}` })),
     ...h.vacunas.map((v) => ({ f: v.fecha_aplicacion, t: `💉 ${esc(v.tipo)}`, d: `${esc(v.vacuna)} ${v.lote ? `(lote ${esc(v.lote)})` : ''} — próxima: ${esc(v.proxima_dosis) || '—'}` })),
+    ...h.cirugias.map((c) => ({ f: c.fecha, t: '🔪 Cirugía', d: `<strong>${esc(c.procedimiento)}</strong> ${badge(c.estado)} ${c.asa ? badge(c.asa) : ''}<br>${esc(c.hallazgos || '')} ${linkPrint('cirugias', c.id)}` })),
     ...h.hospitalizaciones.map((x) => ({ f: x.fecha_ingreso, t: '🏥 Hospitalización', d: `${esc(x.motivo)} ${badge(x.estado)}<br>${esc(x.observaciones)}` })),
+    ...h.guarderia.map((x) => ({ f: x.fecha_ingreso, t: '🏠 Guardería', d: `${esc(x.fecha_ingreso)} → ${esc(x.fecha_salida)} ${badge(x.estado)}` })),
     ...h.peluqueria.map((x) => ({ f: x.fecha, t: '✂️ Peluquería', d: `${esc(x.servicio)} ${esc(x.observaciones)}` })),
+    ...h.consentimientos.map((x) => ({ f: x.fecha, t: '✍️ Consentimiento', d: `${esc(x.tipo)} — firmado por ${esc(x.firmante)} ${linkPrint('consentimientos', x.id)}` })),
   ].sort((a, b) => (a.f < b.f ? 1 : -1));
+  const botones = [['consultas', '+ Consulta', true], ['recetas', '+ Receta'], ['vacunas', '+ Vacuna'], ['cirugias', '+ Cirugía'], ['hospitalizaciones', '+ Hospitalización'],
+    ['consentimientos', '+ Consentimiento'], ['citas', '+ Cita']].filter(([m]) => canWrite(m));
   view.innerHTML = `
+    ${p.alergias ? `<div class="panel" style="border-color:#f3c4c4;background:#fdecea;margin-bottom:12px"><strong>⚠️ Alertas:</strong> ${esc(p.alergias)}</div>` : ''}
     <div class="historia-head">
       <div><span>Paciente</span><strong>${esc(p.nombre)}</strong></div>
       <div><span>Especie / Raza</span>${esc(p.especie)} ${esc(p.raza)}</div>
-      <div><span>Sexo</span>${esc(p.sexo) || '—'}</div>
+      <div><span>Sexo</span>${esc(p.sexo) || '—'} ${p.esterilizado === 'Sí' ? '(esterilizado)' : ''}</div>
       <div><span>Nacimiento</span>${esc(p.fecha_nacimiento) || '—'}</div>
       <div><span>Peso</span>${esc(p.peso) || '—'} kg</div>
+      <div><span>Microchip</span>${esc(p.microchip) || '—'}</div>
       <div><span>Propietario</span>${esc(h.propietario.nombre)} · ${esc(h.propietario.telefono)}</div>
     </div>
     <div class="toolbar">
-      <button class="btn primary" data-new="consultas">+ Consulta</button>
-      <button class="btn ghost" data-new="vacunas">+ Vacuna</button>
-      <button class="btn ghost" data-new="hospitalizaciones">+ Hospitalización</button>
-      <button class="btn ghost" data-new="citas">+ Cita</button>
+      ${botones.map(([m, l, primary]) => `<button class="btn ${primary ? 'primary' : 'ghost'}" data-new="${m}">${l}</button>`).join('')}
+      <a class="btn ghost" href="#imprimir/historia/${p.id}">🖨 Imprimir historia</a>
       <a class="btn ghost" href="#pacientes">← Volver</a>
     </div>
     <div class="timeline">${eventos.length ? eventos.map((e) => `<div class="item"><small>${esc(e.f)} · ${e.t}</small><div>${e.d}</div></div>`).join('') : '<p class="empty">Sin registros clínicos todavía</p>'}</div>`;
   view.querySelectorAll('[data-new]').forEach((b) => {
-    b.onclick = () => openForm(b.dataset.new, null, () => renderHistoria(id), { paciente_id: p.id });
+    b.onclick = () => {
+      const preset = { paciente_id: p.id };
+      if (b.dataset.new === 'consentimientos') Object.assign(preset, { firmante: h.propietario.nombre, documento_firmante: h.propietario.documento });
+      openForm(b.dataset.new, null, () => renderHistoria(id), preset);
+    };
   });
+}
+
+/* ---------- Documentos imprimibles ---------- */
+function docHead(titulo, sub = '') {
+  const datos = [CONFIG.nit && `NIT ${CONFIG.nit}`, CONFIG.direccion, CONFIG.telefono && `Tel. ${CONFIG.telefono}`, CONFIG.email].filter(Boolean).map(esc).join(' · ');
+  return `<div class="doc-head"><div><h2>${esc(CONFIG.nombre_clinica)}</h2><small>${datos}</small></div>
+    <div style="text-align:right"><h2>${esc(titulo)}</h2><small>${sub}</small></div></div>`;
+}
+const kv = (pairs) => `<div class="kv">${pairs.map(([k, v]) => `<div><span>${esc(k)}</span>${v === null || v === undefined || v === '' ? '—' : esc(v)}</div>`).join('')}</div>`;
+const block = (t, v) => (v ? `<h3>${esc(t)}</h3><pre>${esc(v)}</pre>` : '');
+
+async function pacienteInfo(pid) {
+  const p = await api(`/api/pacientes/${pid}`);
+  const o = await api(`/api/propietarios/${p.propietario_id}`);
+  return kv([['Paciente', p.nombre], ['Especie / Raza', `${p.especie} ${p.raza || ''}`], ['Sexo', p.sexo], ['Peso', p.peso ? `${p.peso} kg` : null], ['Propietario', o.nombre], ['Documento / Tel.', `${o.documento} · ${o.telefono}`]]);
+}
+
+async function renderImprimir(tipo, id) {
+  $('#title').textContent = 'Vista de impresión';
+  let html = '';
+  if (tipo === 'factura') {
+    const f = await api(`/api/facturas/${id}`);
+    html = `${docHead(f.tipo === 'Factura' ? 'Factura de venta' : 'Presupuesto', `N.º ${esc(f.numero)} · ${esc(f.fecha)} · ${badge(f.estado)}`)}
+      ${kv([['Cliente', f.propietario_nombre], ['Documento', f.propietario_documento], ['Teléfono', f.propietario_telefono], ['Dirección', f.propietario_direccion], ['Paciente', f.paciente_nombre], ['Pago', f.metodo_pago || 'Pendiente']])}
+      <h3>Detalle</h3><table><thead><tr><th>Descripción</th><th>Cant.</th><th>Precio</th><th>IVA</th><th>Total</th></tr></thead>
+      <tbody>${f.items.map((i) => `<tr><td>${esc(i.descripcion)}</td><td>${i.cantidad}</td><td>${money(i.precio)}</td><td>${i.iva}%</td><td>${money(i.total)}</td></tr>`).join('')}</tbody></table>
+      <div class="totales" style="margin-top:12px"><div><span>Subtotal</span><span>${money(f.subtotal)}</span></div><div><span>Descuento</span><span>− ${money(f.descuento)}</span></div>
+      <div><span>IVA</span><span>${money(f.impuestos)}</span></div><div class="grand"><span>Total</span><span>${money(f.total)}</span></div></div>
+      ${f.notas ? `<p><small>${esc(f.notas)}</small></p>` : ''}
+      ${f.tipo === 'Presupuesto' ? '<p><small>Presupuesto válido por 15 días. Los valores pueden variar según la evolución del paciente.</small></p>' : ''}`;
+  } else if (tipo === 'historia') {
+    const h = await api(`/api/pacientes/${id}/historia`);
+    html = `${docHead('Historia clínica', `Impresa el ${hoyISO()}`)}${await pacienteInfo(id)}
+      ${h.paciente.alergias ? `<h3>Alertas</h3><p>${esc(h.paciente.alergias)}</p>` : ''}
+      ${h.consultas.map((c) => `<h3>Consulta ${esc(c.fecha)} — ${esc(c.motivo)}</h3>
+        <p><small>T° ${esc(c.temperatura) || '—'} · Peso ${esc(c.peso) || '—'} kg · FC ${esc(c.frecuencia_cardiaca) || '—'} · FR ${esc(c.frecuencia_respiratoria) || '—'} · ${esc(c.veterinario)}</small></p>
+        ${['anamnesis', 'examen_fisico', 'diagnostico', 'tratamiento'].map((k) => (c[k] ? `<p><strong>${esc(META.consultas.fields.find((f) => f.name === k).label)}:</strong> ${esc(c[k])}</p>` : '')).join('')}`).join('')}
+      ${h.vacunas.length ? `<h3>Vacunación y desparasitación</h3><table><tr><th>Fecha</th><th>Tipo</th><th>Producto</th><th>Lote</th><th>Próxima</th></tr>${h.vacunas.map((v) => `<tr><td>${esc(v.fecha_aplicacion)}</td><td>${esc(v.tipo)}</td><td>${esc(v.vacuna)}</td><td>${esc(v.lote)}</td><td>${esc(v.proxima_dosis)}</td></tr>`).join('')}</table>` : ''}
+      ${h.cirugias.map((c) => `<h3>Cirugía ${esc(c.fecha)} — ${esc(c.procedimiento)}</h3><p>${esc(c.estado)} · ${esc(c.asa || '')} · Cirujano: ${esc(c.cirujano || '—')}</p>${c.hallazgos ? `<p>${esc(c.hallazgos)}</p>` : ''}`).join('')}`;
+  } else if (['recetas', 'cirugias', 'consentimientos'].includes(tipo)) {
+    const def = META[tipo];
+    const r = await api(`/api/${tipo}/${id}`);
+    const datos = await pacienteInfo(r.paciente_id);
+    const label = (k) => def.fields.find((f) => f.name === k).label;
+    if (tipo === 'recetas') {
+      html = `${docHead('Fórmula médica', esc(r.fecha))}${datos}${block('Medicamentos', r.medicamentos)}${block('Indicaciones', r.indicaciones)}
+        <div class="firma-box"><div>${esc(r.veterinario)}<br>${r.tarjeta_profesional ? `T.P. ${esc(r.tarjeta_profesional)}` : 'Médico veterinario'}</div></div>`;
+    } else if (tipo === 'cirugias') {
+      html = `${docHead('Registro quirúrgico y anestésico', `${esc(r.fecha)} · ${badge(r.estado)}`)}${datos}
+        <h3>Procedimiento</h3>${kv([['Procedimiento', r.procedimiento], ['Cirujano', r.cirujano], ['Anestesiólogo', r.anestesiologo], ['Riesgo ASA', r.asa], ['Ayuno', r.ayuno ? `${r.ayuno} h` : null], ['Horario', `${r.hora_inicio || '—'} a ${r.hora_fin || '—'}`]])}
+        ${['premedicacion', 'induccion', 'mantenimiento', 'monitoreo', 'hallazgos', 'complicaciones', 'postoperatorio'].map((k) => block(label(k), r[k])).join('')}
+        <div class="firma-box"><div>Cirujano</div><div>Anestesiólogo</div></div>`;
+    } else {
+      html = `${docHead(`Consentimiento informado — ${r.tipo}`, esc(r.fecha))}${datos}${block('Declaración', r.texto)}
+        <div style="margin-top:24px"><img src="${esc(r.firma)}" alt="firma" style="max-height:110px" />
+        <div style="border-top:1px solid #333;width:300px;padding-top:6px;font-size:12px">${esc(r.firmante)} · Doc. ${esc(r.documento_firmante)}</div></div>`;
+    }
+  } else {
+    html = '<p class="empty">Documento no encontrado</p>';
+  }
+  view.innerHTML = `<div class="toolbar no-print"><button class="btn primary" id="print">🖨 Imprimir / Guardar PDF</button><button class="btn ghost" id="back">← Volver</button></div><div class="doc">${html}</div>`;
+  $('#print').onclick = () => window.print();
+  $('#back').onclick = () => history.back();
 }
 
 /* ---------- Reportes ---------- */
 async function renderReportes() {
   $('#title').textContent = 'Reportes';
-  const r = await api('/api/reportes/ventas');
-  const bars = (list, key, val, fmt = (x) => x) => {
-    const max = Math.max(1, ...list.map((x) => x[val]));
-    return list.length ? list.map((x) => `<tr><td style="width:30%">${esc(x[key])}</td><td><div class="bar" style="width:${(x[val] / max) * 100}%"></div></td><td style="width:25%;text-align:right">${fmt(x[val])}</td></tr>`).join('') : '<tr><td class="empty">Sin datos</td></tr>';
+  const mes = hoyISO().slice(0, 7);
+  view.innerHTML = `<div class="toolbar filters"><label>Desde <input type="date" id="desde" value="${mes}-01" /></label><label>Hasta <input type="date" id="hasta" value="${hoyISO()}" /></label>
+    <button class="btn primary" id="go">Actualizar</button></div><div id="rep"></div>`;
+  const load = async () => {
+    const r = await api(`/api/reportes?desde=${$('#desde').value}&hasta=${$('#hasta').value}`);
+    const k = r.kpis;
+    const bars = (list, key, val, fmt = (x) => x) => {
+      const max = Math.max(1, ...list.map((x) => x[val]));
+      return list.length ? list.map((x) => `<tr><td style="width:35%">${esc(x[key])}</td><td><div class="bar" style="width:${(x[val] / max) * 100}%"></div></td><td style="width:25%;text-align:right">${fmt(x[val])}</td></tr>`).join('') : '<tr><td class="empty">Sin datos</td></tr>';
+    };
+    const card = (n, l) => `<div class="card"><div class="num">${n}</div><div class="lbl">${l}</div></div>`;
+    $('#rep').innerHTML = `<div class="cards">
+        ${card(money(k.ingresos), 'Ingresos')}${card(k.facturas, 'Facturas')}${card(money(k.ticket_promedio), 'Ticket promedio')}${card(money(k.por_cobrar), 'Cartera por cobrar')}
+        ${card(k.clientes_nuevos, 'Clientes nuevos')}${card(k.consultas, 'Consultas')}${card(k.cirugias, 'Cirugías finalizadas')}
+        ${card(k.tasa_asistencia === null ? '—' : `${k.tasa_asistencia}%`, `Asistencia a citas (${k.citas_atendidas} atendidas · ${k.citas_no_asistio} no asistió)`)}
+      </div><div class="panels">
+        <div class="panel"><h3>Ingresos por mes (12 meses)</h3><table>${bars(r.por_mes, 'mes', 'total', money)}</table></div>
+        <div class="panel"><h3>Ingresos por método de pago</h3><table>${bars(r.por_metodo, 'metodo_pago', 'total', money)}</table></div>
+        <div class="panel"><h3>Productos y servicios más vendidos</h3><table>${bars(r.top_productos, 'descripcion', 'total', money)}</table></div>
+        <div class="panel"><h3>Diagnósticos más frecuentes</h3><table>${bars(r.diagnosticos, 'diagnostico', 'cantidad')}</table></div>
+        <div class="panel"><h3>Pacientes por especie</h3><table>${bars(r.por_especie, 'especie', 'cantidad')}</table></div>
+      </div>`;
   };
-  view.innerHTML = `<div class="panels">
-    <div class="panel"><h3>Ventas por mes</h3><table>${bars(r.por_mes, 'mes', 'total', money)}</table></div>
-    <div class="panel"><h3>Ventas por método de pago</h3><table>${bars(r.por_metodo, 'metodo_pago', 'total', money)}</table></div>
-    <div class="panel"><h3>Pacientes por especie</h3><table>${bars(r.por_especie, 'especie', 'cantidad')}</table></div>
-  </div>`;
+  $('#go').onclick = load;
+  await load();
+}
+
+/* ---------- Usuarios ---------- */
+async function renderUsuarios() {
+  $('#title').textContent = 'Usuarios';
+  const ROLES = [['admin', 'Administrador'], ['veterinario', 'Veterinario'], ['recepcion', 'Recepción']];
+  view.innerHTML = `<div class="toolbar"><span class="kpi-sub" style="flex:1">Administrador: todo · Veterinario: módulos clínicos · Recepción: agenda, clientes, facturación e inventario</span>
+    <button class="btn primary" id="new">+ Nuevo usuario</button></div>
+    <div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>`;
+  const load = async () => {
+    const list = await api('/api/usuarios');
+    $('#rows').innerHTML = list.map((u) => `<tr><td>${esc(u.nombre)}</td><td>${esc(u.usuario)}</td><td>${esc(u.rol)}</td><td>${badge(u.activo ? 'Activo' : 'Inactivo')}</td>
+      <td class="acts"><button class="btn sm ghost" data-edit="${u.id}">Editar</button>
+      <button class="btn sm ${u.activo ? 'danger' : 'ghost'}" data-toggle="${u.id}" data-activo="${u.activo}">${u.activo ? 'Desactivar' : 'Activar'}</button></td></tr>`).join('');
+    $('#rows').onclick = async (e) => {
+      const { edit, toggle } = e.target.dataset;
+      try {
+        if (toggle) { await api(`/api/usuarios/${toggle}`, { method: 'PUT', body: JSON.stringify({ activo: e.target.dataset.activo !== 'true' }) }); load(); }
+        if (edit) {
+          const u = list.find((x) => x.id == edit);
+          openCustomForm('Editar usuario', [
+            { name: 'nombre', label: 'Nombre', required: true }, { name: 'rol', label: 'Rol', type: 'select', options: ROLES },
+            { name: 'password', label: 'Nueva contraseña (vacío = sin cambio)', type: 'password' },
+          ], u, async (b) => { await api(`/api/usuarios/${u.id}`, { method: 'PUT', body: JSON.stringify(b) }); load(); });
+        }
+      } catch (err) { toast(errText(err)); }
+    };
+  };
+  $('#new').onclick = () => openCustomForm('Nuevo usuario', [
+    { name: 'nombre', label: 'Nombre', required: true }, { name: 'usuario', label: 'Usuario', required: true },
+    { name: 'rol', label: 'Rol', type: 'select', options: ROLES }, { name: 'password', label: 'Contraseña (mín. 8)', type: 'password', required: true },
+  ], { rol: 'recepcion' }, async (b) => { await post('/api/usuarios', b); load(); });
+  await load();
+}
+
+/* ---------- Configuración ---------- */
+async function renderConfig() {
+  $('#title').textContent = 'Configuración';
+  const c = await api('/api/configuracion');
+  const url = `${location.origin}/reservar.html`;
+  const campos = [['nombre_clinica', 'Nombre de la clínica'], ['nit', 'NIT'], ['direccion', 'Dirección'], ['telefono', 'Teléfono'], ['email', 'Correo'],
+    ['hora_apertura', 'Hora de apertura', 'time'], ['hora_cierre', 'Hora de cierre', 'time'], ['duracion_cita', 'Duración de cita (min)', 'number']];
+  view.innerHTML = `<div class="panels"><form class="panel" id="cfg"><h3>Datos de la clínica (aparecen en facturas, recetas y recordatorios)</h3><div class="grid">
+      ${campos.map(([k, l, t]) => `<label>${l}<input name="${k}" type="${t || 'text'}" value="${esc(c[k])}" /></label>`).join('')}</div>
+      <div class="actions"><button class="btn primary">Guardar</button></div></form>
+    <div class="panel"><h3>🌐 Reserva de citas en línea</h3><p>Comparta este enlace con sus clientes (redes sociales, WhatsApp, sitio web). Las solicitudes llegan a la Agenda con estado <strong>Solicitada</strong> para que las confirme.</p>
+      <p><a href="${url}" target="_blank">${url}</a></p><button class="btn ghost" id="copy">Copiar enlace</button></div></div>`;
+  $('#copy').onclick = () => navigator.clipboard.writeText(url).then(() => toast('Enlace copiado', true));
+  $('#cfg').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      CONFIG = await api('/api/configuracion', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
+      $('#brand-name').textContent = CONFIG.nombre_clinica;
+      toast('Configuración guardada', true);
+    } catch (err) { toast(errText(err)); }
+  };
 }
 
 /* ---------- Inicio ---------- */
 $('#toggle').onclick = () => $('#sidebar').classList.toggle('open');
 window.addEventListener('hashchange', route);
-api('/api/meta').then((m) => { META = m; route(); });
+api('/api/me').then(startApp).catch(showLogin);
