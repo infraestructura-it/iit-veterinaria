@@ -103,7 +103,10 @@ function createApp({ dbFile, adminPassword } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '2mb' }));
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+  // no-cache: el navegador revalida siempre (ETag), así cada actualización se ve sin tener que limpiar la caché
+  app.use(express.static(path.join(__dirname, '..', 'public'), {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+  }));
   app.locals.db = db;
 
   const getConfig = () => {

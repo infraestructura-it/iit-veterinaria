@@ -129,6 +129,12 @@ describe('CRUD de módulos clínicos', () => {
     assert.match((await admin.get('/reservar.html').expect(200)).text, /Reserva/);
   });
 
+  test('los archivos de la interfaz se sirven sin caché para que las actualizaciones se vean al recargar', async () => {
+    const js = await admin.get('/app.js').expect(200);
+    assert.equal(js.headers['cache-control'], 'no-cache');
+    assert.match(js.text, /🧪 Laboratorio/);
+  });
+
   test('ruta API inexistente devuelve 404 JSON', async () => {
     const res = await admin.get('/api/no-existe').expect(404);
     assert.ok(res.body.error);
