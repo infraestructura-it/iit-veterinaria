@@ -4,6 +4,7 @@ const resources = require('./resources');
 const { createDb, tx } = require('./db');
 const { registerAuth, requireRole, ensureAdmin } = require('./auth');
 const { registerFacturas } = require('./facturas');
+const { initLabDb, registerLab, registerLabPublic } = require('./laboratorio');
 
 function today() {
   const d = new Date();
@@ -25,6 +26,7 @@ const CONFIG_DEFAULTS = {
   hora_apertura: '08:00',
   hora_cierre: '18:00',
   duracion_cita: '30',
+  url_publica: '',
 };
 
 function validate(def, body, partial = false) {
@@ -92,6 +94,7 @@ function csvCell(v) {
 
 function createApp({ dbFile, adminPassword } = {}) {
   const db = createDb(dbFile);
+  initLabDb(db);
   const generated = ensureAdmin(db, adminPassword ?? process.env.ADMIN_PASSWORD);
   if (generated) {
     console.log(`\n  Usuario inicial creado → usuario: admin  contraseña: ${generated}\n  Cámbiela al ingresar (menú Usuarios).\n`);
@@ -174,6 +177,8 @@ function createApp({ dbFile, adminPassword } = {}) {
     res.status(201).json({ mensaje: `Solicitud recibida para el ${d.fecha} a las ${d.hora}. La clínica confirmará su cita.` });
   });
 
+  registerLabPublic(app, db, getConfig);
+
   /* ---------------- Autenticación (a partir de aquí /api requiere sesión) ---------------- */
   registerAuth(app, db);
 
@@ -186,6 +191,7 @@ function createApp({ dbFile, adminPassword } = {}) {
       if (req.body?.[k] !== undefined) {
         const v = String(req.body[k]).slice(0, 200);
         if (['hora_apertura', 'hora_cierre'].includes(k) && !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) return res.status(400).json({ errors: [`${k}: hora inválida`] });
+        if (k === 'url_publica' && v && !/^https?:\/\/[^\s/]+(\/[^\s]*)?$/.test(v)) return res.status(400).json({ errors: ['URL pública inválida (debe iniciar con http:// o https://)'] });
         up.run(k, v);
       }
     }
@@ -207,6 +213,7 @@ function createApp({ dbFile, adminPassword } = {}) {
         hospitalizados: count('hospitalizaciones', "estado IN ('Hospitalizado','En observación')"),
         en_guarderia: count('guarderia', "estado = 'Hospedado'"),
         cirugias_hoy: count('cirugias', "fecha = ? AND estado != 'Cancelada'", hoy),
+        lab_pendientes: count('lab_ordenes', "estado IN ('Solicitado','Muestra tomada','En proceso')"),
       },
       citas_hoy: db.prepare(`${selectSql('citas', resources.citas)} WHERE fecha = ? AND estado != 'Cancelada' ORDER BY hora`).all(hoy),
       vacunas_pendientes: db.prepare(
@@ -310,10 +317,13 @@ function createApp({ dbFile, adminPassword } = {}) {
       peluqueria: q('peluqueria', 'fecha DESC'),
       consentimientos: db.prepare('SELECT id, fecha, tipo, firmante FROM consentimientos WHERE paciente_id = ? ORDER BY fecha DESC').all(id),
       citas: q('citas', 'fecha DESC, hora DESC'),
+      laboratorio: db.prepare(`SELECT o.id, o.codigo, o.estado, o.fecha_solicitud, o.fecha_validacion, o.conclusion, e.nombre examen
+        FROM lab_ordenes o JOIN lab_examenes e ON e.id = o.examen_id WHERE o.paciente_id = ? AND o.estado != 'Anulado' ORDER BY o.id DESC`).all(id),
     });
   });
 
   registerFacturas(app, db);
+  registerLab(app, db, getConfig);
 
   /* ---------------- CRUD genérico por recurso ---------------- */
   for (const [table, def] of Object.entries(resources)) {

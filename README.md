@@ -14,6 +14,7 @@ Los menús se inspiran en OkVet. Las funciones se compararon con QVET, GVET, Ges
 | 🐶 Pacientes | Ficha con microchip, esterilización y **alertas/alergias**; **historia clínica** en línea de tiempo, imprimible |
 | 👤 Propietarios | Datos de contacto de los tutores |
 | 🩺 Consultas | Formato SOAP: anamnesis, signos vitales, examen físico, diagnóstico y plan |
+| 🧪 Laboratorio | Laboratorio clínico al estilo de un laboratorio veterinario (12 categorías: hematología, coagulación, química sanguínea, minerales, hormonas, uroanálisis, dermatología, citología, parasitología, microbiología, histopatología y pruebas específicas). Órdenes con prioridad y manejo de muestras, resultados con **intervalos de referencia por especie** y marcación automática Alto/Bajo, validación por el profesional, informe imprimible con **código QR de verificación** y envío del enlace por WhatsApp |
 | 💊 Recetas | Fórmula médica imprimible con tarjeta profesional |
 | 💉 Vacunación | Vacunas y desparasitaciones con próxima dosis |
 | 🔪 Cirugías | Registro quirúrgico y **hoja de anestesia** (ASA, ayuno, premedicación, inducción, mantenimiento, monitoreo), imprimible |
@@ -30,6 +31,16 @@ Los menús se inspiran en OkVet. Las funciones se compararon con QVET, GVET, Ges
 
 Todos los listados tienen **Exportar CSV**, que abre directo en Excel (UTF-8 con BOM y separador `;`).
 
+### Laboratorio y código QR
+Flujo de una orden: **Solicitado → Muestra tomada → En proceso → Validado → Entregado** (o Anulado).
+
+- Una orden puede incluir varios exámenes; se crea una orden por examen, con código `LAB-AAAA-000123`.
+- Al registrar los resultados, cada valor se compara con el intervalo de la especie del paciente (canino o felino) y se marca **Alto**, **Bajo** o **Normal**.
+- Solo el administrador y los veterinarios registran y validan. Un resultado validado queda bloqueado; solo el administrador puede reabrirlo.
+- El informe validado lleva un **código QR** que abre `/resultado.html?t=<token>`. Esa página pública confirma que el resultado es auténtico y muestra los datos mínimos, con el apellido del propietario oculto. El token es aleatorio de 144 bits. Si el resultado se reabre o se anula, el QR muestra que no es válido.
+- Para que el QR funcione fuera de la red local, configure la **URL pública** del sistema en Configuración (por ejemplo `https://vet.su-dominio.com`).
+- Los intervalos de referencia del catálogo inicial son **orientativos**. Cada laboratorio debe validarlos con su metodología en *Laboratorio → Catálogo*, donde se editan exámenes, precios, tipo de muestra, indicaciones y parámetros.
+
 ### Reserva de citas en línea
 `/reservar.html` es una página pública para los clientes. Muestra los horarios libres según el horario configurado y crea la cita como *Solicitada*. Si el propietario o la mascota no existen, también los crea. Comparta el enlace desde **Configuración**.
 
@@ -39,14 +50,17 @@ Todos los listados tienen **Exportar CSV**, que abre directo en Excel (UTF-8 con
 | Consultas, recetas, vacunas, cirugías, hospitalización | ✅ | ✅ | solo lectura |
 | Agenda, propietarios, pacientes, guardería, peluquería, consentimientos, facturar | ✅ | ✅ | ✅ |
 | Inventario, proveedores, compras | ✅ | solo lectura | ✅ |
-| Anular facturas, usuarios, configuración | ✅ | — | — |
+| Registrar y validar resultados de laboratorio | ✅ | ✅ | — |
+| Crear órdenes de laboratorio, registrar muestras, entregar | ✅ | ✅ | ✅ |
+| Anular facturas, reabrir resultados, catálogo de laboratorio, usuarios, configuración | ✅ | — | — |
 
 ## Stack
 
 - **Backend:** Node.js + Express + SQLite integrado de Node.js (`node:sqlite`, requiere Node 22.13 o superior; no necesita compilar nada)
 - **Seguridad:** contraseñas con `scrypt` y sesiones en cookie HttpOnly guardadas en la base de datos
 - **Frontend:** HTML/CSS/JS sin dependencias (SPA con rutas por hash)
-- **Pruebas:** `node:test` + supertest (56 pruebas)
+- **Código QR:** librería `qrcode` (JavaScript puro, sin compilación)
+- **Pruebas:** `node:test` + supertest (76 pruebas)
 
 La mayoría de los módulos se definen en `src/resources.js`. Esa definición genera la tabla, la API REST, la validación, los permisos, la exportación CSV y el formulario. Para agregar un campo basta con añadirlo ahí: las bases de datos existentes reciben la columna nueva automáticamente al iniciar.
 
@@ -69,7 +83,8 @@ Variables de entorno: `PORT` (por defecto 3000), `DB_FILE` (por defecto `veterin
 - Facturación: `GET/POST /api/facturas`, `GET /api/facturas/:id`, `POST /api/facturas/:id/pagar | convertir | anular`
 - `GET /api/dashboard`, `/api/sala-espera`, `/api/recordatorios?dias=7`, `/api/reportes?desde=&hasta=`, `/api/pacientes/:id/historia`
 - Sesión: `POST /api/login`, `POST /api/logout`, `GET /api/me`, `PUT /api/me/password`; usuarios: `/api/usuarios` (admin)
-- Público (sin sesión): `GET /api/publico/clinica`, `GET /api/publico/disponibilidad?fecha=`, `POST /api/publico/reservar`
+- Laboratorio: `GET/POST /api/lab/catalogo`, `PUT /api/lab/catalogo/:id`, `GET/POST /api/lab/ordenes`, `GET /api/lab/ordenes/:id`, `POST /api/lab/ordenes/:id/muestra | validar | entregar | reabrir | anular`, `PUT /api/lab/ordenes/:id/resultados`, `GET /api/lab/ordenes/:id/qr.svg`
+- Público (sin sesión): `GET /api/publico/resultado/:token`, `GET /api/publico/clinica`, `GET /api/publico/disponibilidad?fecha=`, `POST /api/publico/reservar`
 
 ## Pendiente (siguientes fases)
 

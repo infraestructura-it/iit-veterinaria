@@ -1,8 +1,11 @@
 // Carga datos de ejemplo: npm run seed
 const { createDb } = require('../src/db');
 const { today, addDays } = require('../src/app');
+const crypto = require('node:crypto');
+const { initLabDb, armarResultados } = require('../src/laboratorio');
 
 const db = createDb();
+initLabDb(db);
 const ins = (t, o) => {
   const k = Object.keys(o);
   return Number(db.prepare(`INSERT INTO ${t} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`).run(...Object.values(o)).lastInsertRowid);
@@ -43,5 +46,20 @@ const fac = (numero, propietario, paciente, metodo, items) => {
 };
 fac('FV-000001', ana, firu, 'Tarjeta', [[consulta, 'Consulta general', 1, 60000], [melox, 'Meloxicam 1.5mg/ml', 1, 38000]]);
 fac('FV-000002', luis, mishi, null, [[null, 'Desparasitación', 1, 45000]]);
+
+// Laboratorio: un cuadro hemático validado (con QR) y un perfil renal pendiente
+const examen = (codigo) => db.prepare('SELECT * FROM lab_examenes WHERE codigo = ?').get(codigo);
+const hem = examen('HEM-01');
+const valores = { Hematocrito: '34', Hemoglobina: '11.2', Eritrocitos: '5.1', VCM: '66', HCM: '21.9', CHCM: '33', Leucocitos: '18.4',
+  'Neutrófilos segmentados': '13.1', 'Neutrófilos en banda': '0.2', Linfocitos: '3.6', Monocitos: '0.9', 'Eosinófilos': '0.6',
+  Plaquetas: '245', 'Proteínas plasmáticas totales': '7.4', 'Hemoparásitos': 'No se observan', 'Morfología celular': 'Leve anisocitosis' };
+const resultados = armarResultados(JSON.parse(hem.parametros), valores, 'Canino');
+const lab1 = ins('lab_ordenes', { paciente_id: firu, examen_id: hem.id, fecha_solicitud: `${addDays(hoy, -1)} 09:10`, fecha_toma: `${addDays(hoy, -1)} 09:20`,
+  solicitante: 'Dra. Ruiz', prioridad: 'Normal', estado: 'Validado', resultados: JSON.stringify(resultados),
+  conclusion: 'Anemia leve normocítica normocrómica con leucocitosis por neutrofilia. Sugiere proceso inflamatorio; correlacionar con la clínica.',
+  validado_por: 'Dra. Ruiz', fecha_validacion: `${addDays(hoy, -1)} 15:40`, token: crypto.randomBytes(18).toString('base64url') });
+const lab2 = ins('lab_ordenes', { paciente_id: mishi, examen_id: examen('QS-02').id, fecha_solicitud: `${hoy} 08:30`, solicitante: 'Dr. Castro',
+  prioridad: 'Urgente', estado: 'Solicitado', token: crypto.randomBytes(18).toString('base64url') });
+for (const id of [lab1, lab2]) db.prepare('UPDATE lab_ordenes SET codigo = ? WHERE id = ?').run(`LAB-${hoy.slice(0, 4)}-${String(id).padStart(6, '0')}`, id);
 
 console.log('Datos de ejemplo cargados.');

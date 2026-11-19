@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Verificación de resultado de laboratorio</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { display: block; background: linear-gradient(180deg, #0d47a1 0, #1565c0 220px, var(--bg) 220px) no-repeat, var(--bg); }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 28px 14px; }
+    .hero { color: #fff; text-align: center; margin-bottom: 18px; }
+    .hero h1 { margin: 0; font-size: 22px; }
+    .box { background: #fff; border-radius: 14px; padding: 22px; box-shadow: 0 12px 40px rgba(0,0,0,.12); }
+    .sello { display: flex; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 10px; margin-bottom: 16px; font-weight: 600; }
+    .sello.ok { background: #e6f4ea; color: var(--ok); }
+    .sello.no { background: #fdecea; color: var(--danger); }
+    .sello span { font-size: 30px; }
+    .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; margin-bottom: 14px; font-size: 14px; }
+    .kv span { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; }
+    table { font-size: 14px; }
+    tr.fuera td { background: #fff5f5; }
+    h3 { color: var(--blue-dark); font-size: 15px; margin: 18px 0 8px; }
+    pre { white-space: pre-wrap; font-family: inherit; margin: 0; }
+    footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero"><div style="font-size:36px">🧪</div><h1 id="clinica">Verificación de resultado</h1></div>
+    <div class="box" id="box"><p class="empty">Verificando...</p></div>
+    <footer id="pie">Esta página confirma que el resultado fue emitido y validado por el laboratorio.</footer>
+  </div>
+  <script>
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const box = document.getElementById('box');
+    const token = new URLSearchParams(location.search).get('t') || '';
+    const flag = (i) => (i === 'Alto' ? '<span class="badge bad">▲ Alto</span>' : i === 'Bajo' ? '<span class="badge bad">▼ Bajo</span>' : i === 'Normal' ? '<span class="badge ok">Normal</span>' : '');
+    const ref = (r) => (r.tipo === 'texto' ? esc(r.normal || '—') : r.ref_min === null ? '—' : `${r.ref_min} – ${r.ref_max}`);
+
+    fetch(`/api/publico/resultado/${encodeURIComponent(token)}`).then(async (res) => {
+      if (!res.ok) {
+        box.innerHTML = `<div class="sello no"><span>✖</span><div>No se encontró un resultado validado con este código.<br><small>Puede que el código sea incorrecto, que el resultado esté en revisión o que haya sido anulado. Comuníquese con la clínica.</small></div></div>`;
+        return;
+      }
+      const r = await res.json();
+      const c = r.clinica;
+      document.getElementById('clinica').textContent = c.nombre_clinica;
+      document.getElementById('pie').innerHTML = [c.nit && `NIT ${c.nit}`, c.direccion, c.telefono && `Tel. ${c.telefono}`].filter(Boolean).map(esc).join(' · ');
+      box.innerHTML = `
+        <div class="sello ok"><span>✔</span><div>Resultado auténtico<br><small>Validado por ${esc(r.validado_por)} el ${esc(r.fecha_validacion)}</small></div></div>
+        <div class="kv">
+          <div><span>Código</span><strong>${esc(r.codigo)}</strong></div>
+          <div><span>Examen</span>${esc(r.examen)}</div>
+          <div><span>Paciente</span>${esc(r.paciente)} (${esc(r.especie)}${r.raza ? ' · ' + esc(r.raza) : ''})</div>
+          <div><span>Propietario</span>${esc(r.propietario)}</div>
+          <div><span>Muestra</span>${esc(r.muestra || '—')}</div>
+          <div><span>Fecha de toma</span>${esc(r.fecha_toma || '—')}</div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Parámetro</th><th>Resultado</th><th>Referencia</th></tr></thead><tbody>
+          ${r.resultados.map((x) => `<tr class="${x.interpretacion && x.interpretacion !== 'Normal' ? 'fuera' : ''}"><td>${esc(x.parametro)}</td><td><strong>${esc(x.valor || '—')}</strong> ${esc(x.unidad)} ${flag(x.interpretacion)}</td><td>${ref(x)}</td></tr>`).join('')}
+        </tbody></table></div>
+        ${r.conclusion ? `<h3>Interpretación</h3><pre>${esc(r.conclusion)}</pre>` : ''}
+        <p><small>Los resultados deben ser interpretados por el médico veterinario tratante.</small></p>`;
+    }).catch(() => { box.innerHTML = '<div class="sello no"><span>✖</span><div>No fue posible verificar el resultado. Intente de nuevo.</div></div>'; });
+  </script>
+</body>
+</html>

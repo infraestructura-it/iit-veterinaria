@@ -151,3 +151,19 @@ dialog.wide { width: min(980px, 96vw); }
   .kanban { grid-template-columns: repeat(4, 80vw); }
   .doc .kv { grid-template-columns: 1fr 1fr; }
 }
+
+/* ---------- Laboratorio ---------- */
+.lab-cat { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin-top: 6px; max-height: 340px; overflow-y: auto; }
+.lab-cat fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin: 0; }
+.lab-cat legend { font-size: 12px; font-weight: 600; color: var(--blue-dark); padding: 0 4px; }
+label.chk { flex-direction: row !important; align-items: flex-start; gap: 8px !important; color: var(--text) !important; padding: 4px 0; cursor: pointer; }
+label.chk input { width: auto; margin-top: 3px; }
+.lab-table td, .lab-table th { padding: 6px 10px; }
+.lab-table tr.fuera td { background: #fff5f5; }
+.lab-foot { display: flex; gap: 24px; align-items: flex-end; margin-top: 16px; }
+.qr-box { text-align: center; width: 150px; }
+.qr-box img { width: 130px; height: 130px; display: block; margin: 0 auto 4px; }
+.qr-box small { font-size: 10px; color: var(--muted); }
+.doc { position: relative; }
+.watermark { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%) rotate(-25deg); font-size: 54px; font-weight: 800; color: rgba(198, 40, 40, .12); white-space: nowrap; pointer-events: none; }
+@media print { .lab-table tr.fuera td { background: #fff5f5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
