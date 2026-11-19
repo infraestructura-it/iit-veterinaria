@@ -21,7 +21,7 @@ La organización de los menús se inspira en plataformas como OkVet.
 
 ## Stack
 
-- **Backend:** Node.js + Express + SQLite (better-sqlite3)
+- **Backend:** Node.js + Express + SQLite integrado de Node.js (`node:sqlite`, requiere Node 22.13 o superior; no necesita compilar nada)
 - **Frontend:** HTML/CSS/JS sin dependencias (SPA con rutas por hash)
 - **Pruebas:** `node:test` + supertest
 
